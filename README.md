@@ -36,9 +36,9 @@ The author is not responsible for any damage or loss caused by using this tool.
 - **[hitin911](https://xdaforums.com/m/hitin911.12861404/)**: For providing the method to decrypt `.x` to `.xml` and for guidance on modifying XML scripts.
 
 ### 1.3 Third-party
-- Android platform-tools (ADB/Fastboot)
-- Python (embeddable) / pip / open-source Python packages (e.g., `cryptography`)
-- SP Flash Tool
+- [Android platform-tools](https://developer.android.com/tools/releases/platform-tools?hl=en) (ADB/Fastboot)
+- [Python (embeddable)](https://www.python.org/downloads/windows/) / pip / open-source Python packages (e.g., [cryptography](https://pypi.org/project/cryptography/))
+- [SP Flash Tool V6](https://spflashtools.com/windows/sp-flash-tool-v6-2404)
 
 > LPMBox does **not** include Lenovo firmware.  
 > Users must download official firmware via official channels (e.g., Lenovo Software Fix).
