@@ -140,7 +140,7 @@ Upgrade while keeping user data **as much as possible**.
 Disables system OTA update checks, notifications, and related “What’s New” / recommendation components on the device.
 
 ### 5.4 Option 4: Developer YouTube
-A quick shortcut to the developer’s YouTube channel for guides, tutorials, and troubleshooting content related
+We introduce guide and tutorial videos for LPMBox, along with programs you can use on Lenovo tablets (Xiaoxin Pad, Y700, GT, Yoga Pad Pro, etc.) running ZUI and ZUXOS.
 
 ---
 
