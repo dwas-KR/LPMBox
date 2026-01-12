@@ -1,10 +1,10 @@
-# LPMKBox
+# LPMBox
 ![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)
 
 > This project follows the LTBox documentation style and is released under the LTBox license model.  
 > - [LTBox](https://github.com/jjhitel/LTBox), [LTBox License](https://github.com/jjhitel/LTBox?tab=License-1-ov-file)  
 > - Inspired by LTBox and adapted for MediaTek-based Lenovo tablet firmware workflows.  
-> - **Not affiliated with or endorsed by the LTBox developer. I only received permission to develop LPMKBox.**  
+> - **Not affiliated with or endorsed by the LTBox developer. I only received permission to develop LPMBox.**  
 > - Based on LTBox (CC BY-NC-SA 4.0); modified and extended by **돠스 (dwas)** for MTK Lenovo firmware workflows.  
 > - **NonCommercial:** Do not sell this project, offer paid access, or use it primarily for commercial advantage or monetary compensation.
 
@@ -32,7 +32,7 @@ The author is not responsible for any damage or loss caused by using this tool.
   Licensed under CC BY-NC-SA 4.0 (as stated in the LTBox README)
 
 ### 1.2 Special thanks
-- **Anonymous[ㅇㅇ](https://gall.dcinside.com/board/lists?id=tabletpc)**: Thank you for sharing the LTBox project and files, and for making it possible to develop LPMKBox.
+- **Anonymous[ㅇㅇ](https://gall.dcinside.com/board/lists?id=tabletpc)**: Thank you for sharing the LTBox project and files, and for making it possible to develop LPMBox.
 - **[hitin911](https://xdaforums.com/m/hitin911.12861404/)**: For providing the method to decrypt `.x` to `.xml` and for guidance on modifying XML scripts.
 
 ### 1.3 Third-party
@@ -40,7 +40,7 @@ The author is not responsible for any damage or loss caused by using this tool.
 - [Python (embeddable)](https://www.python.org/downloads/windows/) / pip / open-source Python packages (e.g., [cryptography](https://pypi.org/project/cryptography/))
 - [SP Flash Tool V6](https://spflashtools.com/windows/sp-flash-tool-v6-2404)
 
-> LPMKBox does **not** include Lenovo firmware.  
+> LPMBox does **not** include Lenovo firmware.  
 > Users must download official firmware via official channels (e.g., Lenovo Software Fix).
 
 ---
@@ -54,7 +54,7 @@ The author is not responsible for any damage or loss caused by using this tool.
 
 ## 3. Overview
 
-**LPMKBox** is a helper tool designed to make PRC (CN) / ROW (Global) firmware operations easier on **MediaTek (MTK)-based Lenovo tablets**.
+**LPMBox** is a helper tool designed to make PRC (CN) / ROW (Global) firmware operations easier on **MediaTek (MTK)-based Lenovo tablets**.
 
 ### Key features
 - **Option 1:** Install PRC (CN) / ROW (Global) firmware **[Data Wipe / Factory Reset]**
@@ -78,14 +78,14 @@ The author is not responsible for any damage or loss caused by using this tool.
 ## 4. Quick Start (How to Use)
 
 ### 4.1 Download & Extract
-Download the LPMKBox release archive and **extract** it.
+Download the LPMBox release archive and **extract** it.
 
 ### 4.2 Install Drivers (Important)
 Download and install the MTK driver from:
 - https://mtkdriver.com/
 
 ### 4.3 Prepare the `image/` Folder (Important)
-Copy the official firmware **`image`** folder downloaded via Lenovo Software Fix into the LPMKBox root directory
+Copy the official firmware **`image`** folder downloaded via Lenovo Software Fix into the LPMBox root directory
 - `image/`
 - `image/flash.xml`
 - `image/da.auth`
@@ -140,7 +140,7 @@ Upgrade while keeping user data **as much as possible**.
 Disables system OTA update checks, notifications, and related “What’s New” / recommendation components on the device.
 
 ### 5.4 Option 4: Developer YouTube
-We introduce guide and tutorial videos for LPMKBox, along with programs you can use on Lenovo tablets (Xiaoxin Pad, Y700, GT, Yoga Pad Pro, etc.) running ZUI and ZUXOS.
+We introduce guide and tutorial videos for LPMBox, along with programs you can use on Lenovo tablets (Xiaoxin Pad, Y700, GT, Yoga Pad Pro, etc.) running ZUI and ZUXOS.
 
 ---
 
@@ -164,7 +164,7 @@ An official firmware/tool package for your device that includes:
 
 ## 7. License
 
-LPMKBox follows the same license model as **LTBox**.
+LPMBox follows the same license model as **LTBox**.
 
 This work is licensed under the  
 **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)**.
@@ -181,7 +181,7 @@ For full details, see the `LICENSE` file or visit:
 https://creativecommons.org/licenses/by-nc-sa/4.0/
 
 > ⚠️ **Note**  
-> Third-party tools or files used or downloaded by LPMKBox (e.g., SP Flash Tool, platform-tools, firmware packages)  
+> Third-party tools or files used or downloaded by LPMBox (e.g., SP Flash Tool, platform-tools, firmware packages)  
 > are subject to **their own licenses and distribution terms**. Please review and comply with them separately.
 
 [![CC BY-NC-SA 4.0][cc-by-nc-sa-image]][cc-by-nc-sa]
