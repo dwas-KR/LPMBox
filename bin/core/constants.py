@@ -33,6 +33,12 @@ PRC_ZIP_URLS = [
     "https://github.com/dwas-KR/LPMBox/raw/Downloads/PRC.zip"
 ]
 
+LK_DTBO_DIR = TOOLS_DIR / "lk, dtbo"
+LK_DTBO_ZIP_URLS = [
+    "https://raw.githubusercontent.com/dwas-KR/LPMBox/ee1fad3913cfe4dfc0214dbd95df3a82c0517b54/lk%2C%20dtbo.zip",
+    "https://github.com/dwas-KR/LPMBox/raw/ee1fad3913cfe4dfc0214dbd95df3a82c0517b54/lk%2C%20dtbo.zip"
+]
+
 PYTHON_VERSION = "3.14.2"
 PYTHON_EMBED_URL_TEMPLATE = "https://www.python.org/ftp/python/{version}/python-{version}-embed-{arch}.zip"
 PYTHON_PTH_FILENAME = "python314._pth"

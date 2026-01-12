@@ -21,7 +21,10 @@ from .constants import (
     REQUIRED_PYTHON_PACKAGES,
     SPFT_EXE,
     PRC_DIR,
+    LK_DTBO_DIR,
+    LK_DTBO_ZIP_URLS,
 )
+
 from .utils import log
 
 
@@ -189,6 +192,42 @@ def ensure_spflashtool() -> bool:
     return False
 
 
+def ensure_lk_dtbo() -> None:
+    lk = LK_DTBO_DIR / "lk.img"
+    dtbo = LK_DTBO_DIR / "dtbo.img"
+
+    if lk.is_file() and dtbo.is_file():
+        log("dl.lk_dtbo_skip")
+        return
+
+    try:
+        TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    zip_path = TOOLS_DOWNLOAD_DIR / "lk, dtbo.zip"
+
+    if not zip_path.is_file():
+        log("dl.lk_dtbo_downloading")
+        try:
+            _download_from_list(LK_DTBO_ZIP_URLS, zip_path)
+        except Exception:
+            log("dl.lk_dtbo_download_failed")
+            return
+
+    log("dl.lk_dtbo_extracting")
+    try:
+        _extract_zip(zip_path, LK_DTBO_DIR)
+    except Exception:
+        log("dl.lk_dtbo_extract_failed")
+        return
+
+    if lk.is_file() and dtbo.is_file():
+        log("dl.lk_dtbo_ready")
+    else:
+        log("dl.lk_dtbo_missing_after_extract")
+
+
 def ensure_prc() -> None:
     lk = PRC_DIR / "lk.img"
     dtbo = PRC_DIR / "dtbo.img"
@@ -216,9 +255,9 @@ def ensure_prc() -> None:
 def ensure_cryptography() -> bool:
     log("dl.check_crypto")
     try:
-        import cryptography
-        import cffi
-        import pycparser
+        import cryptography  # noqa: F401
+        import cffi  # noqa: F401
+        import pycparser  # noqa: F401
         log("dl.crypto_skip")
         return True
     except Exception:
@@ -231,21 +270,11 @@ def ensure_cryptography() -> bool:
 
     cmd = [str(exe), "-m", "pip", "install"] + REQUIRED_PYTHON_PACKAGES
     try:
-        import cryptography
-        import cffi
-        import pycparser
-        log("dl.crypto_ready")
-        return True
-    except Exception:
-        log("dl.crypto_failed")
-        return False
-
-    try:
         log("dl.crypto_install")
         subprocess.run(cmd, check=True)
-        import cryptography
-        import cffi
-        import pycparser
+        import cryptography  # noqa: F401
+        import cffi  # noqa: F401
+        import pycparser  # noqa: F401
         log("dl.crypto_ready")
         return True
     except Exception:

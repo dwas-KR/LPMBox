@@ -15,6 +15,17 @@ LANG_DIR = Path(__file__).resolve().parent / "lang"
 SETTINGS_PATH = LANG_DIR / "settings.json"
 
 
+def setup_console() -> None:
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleTitleW("LPMBox")
+        sys.stdout.write("\x1b[8;38;145t")
+        sys.stdout.flush()
+        os.system("mode con: cols=145 lines=38")
+    except Exception:
+        pass
+
+
 def _is_embedded() -> bool:
     exe = Path(sys.executable).resolve()
     return exe.parent == PYTHON_DIR.resolve()
@@ -49,6 +60,7 @@ def _choose_language(force_prompt: bool = False) -> None:
         if saved:
             set_language(saved)
             return
+
     while True:
         clear_console()
         print()
@@ -96,6 +108,7 @@ def _main_menu() -> None:
     from .global_flow import run_global_firmware_upgrade_flow
     from .fw_upgrade_flow import run_firmware_upgrade_keep_data_flow
     from .ota_disable_flow import run_ota_disable_flow
+    from .mtk_driver import is_mtk_driver_installed, open_mtk_driver_site
 
     while True:
         clear_console()
@@ -109,8 +122,14 @@ def _main_menu() -> None:
         print(f" 2. {get_string('app.menu.option2')}")
         print()
         print(get_string("app.menu.section_other"))
+
+        driver_installed = is_mtk_driver_installed()
+        status_key = "app.mtk_driver.status_installed" if driver_installed else "app.mtk_driver.status_needed"
+        status = get_string(status_key)
+
         print(f" 3. {get_string('app.menu.option3')}")
-        print(f" 4. {get_string('app.menu.option4')}")
+        print(f" 4. {get_string('app.menu.option4')} {status}")
+        print(f" 5. {get_string('app.menu.option5')}")
         print(f" x. {get_string('app.menu.exit')}")
         print()
         print(separator)
@@ -144,6 +163,8 @@ def _main_menu() -> None:
             except EOFError:
                 pass
         elif choice == "4":
+            open_mtk_driver_site()
+        elif choice == "5":
             try:
                 os.startfile("http://www.youtube.com/@dwas_KR?sub_confirmation=1")
             except OSError:
@@ -159,6 +180,7 @@ def _main_menu() -> None:
 
 
 def main() -> None:
+    setup_console()
     set_language("en")
     exe_embed = downloader.ensure_python_embed()
     if exe_embed is not None and not _is_embedded():
@@ -169,12 +191,14 @@ def main() -> None:
         env["PYTHONPATH"] = str(PYTHON_DIR.parent)
         subprocess.run([str(exe_embed), "-m", "core.bootstrap"], env=env, check=True)
         return
+
     clear_console()
     _choose_language()
     log("bootstrap.start")
     downloader.ensure_platform_tools()
     downloader.ensure_spflashtool()
     downloader.ensure_prc()
+    downloader.ensure_lk_dtbo()
     ok_crypto = downloader.ensure_cryptography()
     if not ok_crypto:
         try:
@@ -183,6 +207,7 @@ def main() -> None:
             pass
         kill_adb_server()
         return
+
     try:
         _main_menu()
     finally:
