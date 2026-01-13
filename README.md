@@ -189,7 +189,7 @@ Introduces guide and tutorial videos for LPMBox, as well as other useful tools f
 
 ### Recommended environment
 
-* Windows 10/11 x64
+* Windows 10/11 (32bit, 64bit)
 * A stable USB cable/port (direct motherboard USB ports are recommended)
 * **USB debugging (ADB) enabled and PC authorized**
 * **MediaTek USB Port (Preloader) drivers installed**
