@@ -135,23 +135,8 @@ On first run (depending on your system):
 **Purpose**
 Clean install / factory reset style installation (**all data will be erased**).
 
-**Typical use cases**
-
 * Installing **ROW (Global)** firmware onto a **PRC (CN)** device
 * Reinstalling firmware from scratch to recover a device
-
-**Workflow (summary)**
-
-1. Check device/platform information via ADB (connected device + MTK platform verification)
-2. Convert and prepare encrypted `scatter.x` → XML scatter file
-3. Replace/prepare PRC (CN) boot-related images (`lk.img`, `dtbo.img`)
-4. Launch SP Flash Tool and guide the user to **backup `proinfo` (Readback)**
-5. Detect the readback `proinfo` file → optionally change the country code
-6. Proceed with full flashing (including `userdata`, data will be wiped)
-
-> If flashing errors related to `lk` or `dtbo` partitions are detected,
-> LPMBox will automatically download the required files (`lk_a`, `lk_b`, `dtbo_a`, `dtbo_b`)
-> and copy them into the `image/` directory before continuing.
 
 ### 5.2 Option 2: Firmware Upgrade [Keep Data]
 
@@ -182,6 +167,9 @@ Downloads and installs the **MediaTek USB / Preloader driver**, and automaticall
 ### 5.5 Option 5: Developer YouTube
 
 Introduces guide and tutorial videos for LPMBox, as well as other useful tools for Lenovo tablets (Xiaoxin Pad, Y700, GT, Yoga Pad Pro, etc.) running ZUI and ZUXOS.
+
+### 5.6 Option 6: Change LPMBox Language
+Lets you change the UI language from the main menu, so you can easily reselect your language if you chose the wrong one.
 
 ---
 
