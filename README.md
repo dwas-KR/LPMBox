@@ -38,27 +38,31 @@
 
 ## 3. Menu (Functions)
 
-### 3.1 Option 1: Firmware Installation [Data Wipe]
-Installs firmware using a factory reset style (**all data will be erased**).
-* You can freely switch between **PRC (CN)** and **ROW (Global)** firmware.
+### 3.1 Option 1: Switch PRC (CN) ↔ ROW (Global) Firmware [Data Wipe]
+Performs a clean install (factory reset). **All data will be erased.**  
+Use this option to freely switch between **PRC (CN)** and **ROW (Global)** firmware.
 
-### 3.2 Option 2: Firmware Upgrade [Keep Data]
-Installs firmware while keeping user data (**`userdata` is set to disabled / skipped**).
+### 3.2 Option 2: Update ROW (Global) Firmware [Keep Data]
+Updates **ROW (Global)** firmware while keeping your user data as much as possible.
 
 ### 3.3 Option 3: Disable OTA
-Disables system OTA update checks, notifications, and related components on the device.
+Disables system OTA update checks, notifications, and related components.
 
-### 3.4 Option 4: MTK Driver Download
-Checks whether the MediaTek driver is installed on your system ([Installed] / [Not installed]) and opens the driver download site.
+### 3.4 Option 4: MediaTek Driver Download
+Opens the MediaTek driver download page and shows the current driver status  
+(e.g., **Installed / Not installed**).
 
-### 3.5 Option 5: Developer YouTube
-Introduces guide/tutorial videos for LPMBox, plus other useful tools for Lenovo tablets (Xiaoxin Pad, Y700, GT, Yoga Pad Pro, etc.) running ZUI and ZUXOS.
+### 3.5 Option 5: Check for LPMBox Updates
+Checks for the LPMBox version and updates the tool if an update is available.
 
 ### 3.6 Option 6: Change LPMBox Language
-Lets you change the UI language from the main menu, so you can easily reselect your language if you chose the wrong one.
+Lets you reselect your preferred UI language at any time.
 
-### 3.7 Option 7: Exit
-Exit the program by pressing x on your keyboard.
+### 3.7 Option 7: Developer YouTube
+Introduces guides and other useful Lenovo tablet tools (ZUI / ZUXOS).
+
+### 3.8 Exit
+Press `x` to exit the program.
 
 ---
 
