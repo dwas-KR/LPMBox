@@ -8,7 +8,7 @@ from .flash_spft import launch_spft_gui, run_firmware_upgrade
 from .global_flow import _ask_country_change_plan, _cleanup_after_flow, _cleanup_before_flow, _check_flash_xml_platform, _detect_platform, _log_device_extra_info
 from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
-from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo
+from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs
 from .utils import clear_console, log, wait_for_device
  
 def _confirm_keep_data() -> bool:
@@ -115,6 +115,7 @@ def run_firmware_upgrade_keep_data_flow() -> None:
     if not wait_for_device():
         return
     log('flow.reboot_now')
+    backup_platform_scatter_to_logs(platform)
     adb_reboot()
     log('preloader.waiting')
     log('preloader.detected')

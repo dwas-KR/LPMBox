@@ -11,7 +11,7 @@ from .flash_spft import launch_spft_gui, run_firmware_upgrade
 from .i18n import get_string
 from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
-from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo
+from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs
 from .utils import clear_console, log, wait_for_device, _write_log_line, run_adb, run_cmd
  
 def _cleanup_before_flow() -> None:
@@ -269,6 +269,7 @@ def run_global_firmware_upgrade_flow() -> None:
     current_slot = _detect_current_ab_slot()
     if current_slot:
         _switch_ab_slot_fastboot(current_slot)
+    backup_platform_scatter_to_logs(platform)
     log("preloader.waiting")
     try:
         run_cmd([str(PLATFORM_TOOLS_DIR / "fastboot"), "reboot"])

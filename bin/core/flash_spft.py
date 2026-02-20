@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 from .constants import TOOLS_DIR, SPFT_EXE, FLASH_XML_DLAGENT, FLASH_XML_ROOT, DA_AUTH_DLAGENT, DA_AUTH_ROOT
-from .utils import log, log_text, _write_log_line
+from .utils import log, log_text, _write_log_line, capture_spft_console_output_snapshot
 
 def _resolve_flash_xml() -> Path | None:
     if FLASH_XML_DLAGENT.is_file():
@@ -164,6 +164,11 @@ def run_firmware_upgrade() -> bool:
                 code = proc.wait()
             except Exception:
                 code = -1
+    try:
+        capture_spft_console_output_snapshot()
+    except Exception:
+        pass
+
 
     if code == 0:
         log('flash.done')

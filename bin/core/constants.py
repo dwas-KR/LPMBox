@@ -24,4 +24,4 @@ PYTHON_EMBED_URL_TEMPLATE = 'https://www.python.org/ftp/python/{version}/python-
 PYTHON_PTH_FILENAME = 'python314._pth'
 GET_PIP_URL = 'https://bootstrap.pypa.io/get-pip.py'
 REQUIRED_PYTHON_PACKAGES = ['cryptography']
-APP_VERSION = 'v1.4.2'
+APP_VERSION = 'v1.4.3'

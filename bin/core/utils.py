@@ -347,14 +347,30 @@ def capture_spft_console_output_snapshot() -> None:
         return
     keywords = (
         'Smart Phone Flash Tool',
+        'Begin',
         'CMD:',
         'has been sent',
+        'data has been sent',
+        'DA data has been sent',
         'scan device',
         'connect brom',
         'EMMC-CONTROL',
         'XML schema',
         'verify load images checksum',
         'All command exec done',
+        'Command line arguments',
+        'Build Time:',
+        'Init config from input arguments',
+        'com port clue',
+        'enter DA mode',
+        'DA SLA',
+        'scatter-file',
+        'image data has been sent',
+        'MediaTek PreLoader',
+        'download_agent',
+        'image',
+        'about',
+        'of',
     )
     seen = set()
     for line in lines:

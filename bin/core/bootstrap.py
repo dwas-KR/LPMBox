@@ -21,10 +21,20 @@ def setup_console() -> None:
         sys.stdout.write('\x1b[8;38;145t')
         sys.stdout.flush()
         os.system('mode con: cols=145 lines=38')
+        try:
+            handle = ctypes.windll.kernel32.GetStdHandle(-11)
+            if handle not in (0, -1):
+                class COORD(ctypes.Structure):
+                    _fields_ = [
+                        ("X", ctypes.c_short),
+                        ("Y", ctypes.c_short),
+                    ]
+                buffer_size = COORD(145, 2000)
+                ctypes.windll.kernel32.SetConsoleScreenBufferSize(handle, buffer_size)
+        except Exception:
+            pass
     except Exception:
         pass
-
-
 def _is_embedded() -> bool:
     exe = Path(sys.executable).resolve()
     return exe.parent == PYTHON_DIR.resolve()

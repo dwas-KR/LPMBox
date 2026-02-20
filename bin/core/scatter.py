@@ -2,7 +2,8 @@ from __future__ import annotations
 from pathlib import Path
 from xml.etree import ElementTree as ET
 import shutil
-from .constants import IMAGE_DIR
+from datetime import datetime
+from .constants import IMAGE_DIR, LOGS_DIR
 from .utils import log
 from .xml_crypto import decrypt_scatter_x
 
@@ -256,3 +257,16 @@ def disable_lk_dtbo_partitions(platform: str) -> None:
     if updated:
         tree.write(scatter_xml, encoding='utf-8', xml_declaration=True)
         log('scatter.lk_dtbo_disabled', path=str(scatter_xml))
+
+
+def backup_platform_scatter_to_logs(platform: str) -> None:
+    try:
+        src = IMAGE_DIR / f"{platform}_Android_scatter.xml"
+        if not src.is_file():
+            return
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        dst = LOGS_DIR / f"{platform}_Android_scatter_{timestamp}.xml"
+        shutil.copy2(src, dst)
+    except Exception:
+        return
