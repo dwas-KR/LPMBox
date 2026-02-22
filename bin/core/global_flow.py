@@ -11,13 +11,20 @@ from .flash_spft import launch_spft_gui, run_firmware_upgrade
 from .i18n import get_string
 from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
-from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs
+from .scatter import prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs, copy_prc_lk_dtbo_to_image, enable_prc_lk_dtbo_partitions
 from .utils import clear_console, log, wait_for_device, _write_log_line, run_adb, run_cmd
  
 def _cleanup_before_flow() -> None:
     for path in IMAGE_DIR.glob('*_Android_scatter.xml'):
         try:
             path.unlink()
+        except OSError:
+            pass
+    for name in ('lk.img', 'dtbo.img'):
+        try:
+            p = IMAGE_DIR / name
+            if p.exists():
+                p.unlink()
         except OSError:
             pass
     if READBACK_DIR.is_dir():
@@ -71,6 +78,13 @@ def _cleanup_after_flow(platform: str | None=None) -> None:
     for path in IMAGE_DIR.glob(pattern):
         try:
             path.unlink()
+        except OSError:
+            pass
+    for name in ('lk.img', 'dtbo.img'):
+        try:
+            p = IMAGE_DIR / name
+            if p.exists():
+                p.unlink()
         except OSError:
             pass
     if READBACK_DIR.is_dir():
@@ -245,7 +259,10 @@ def run_global_firmware_upgrade_flow() -> None:
     if scatter_path is None:
         return
     time.sleep(3)
-    disable_lk_dtbo_partitions(platform)
+    ok_lkdtbo = copy_prc_lk_dtbo_to_image()
+    enabled = enable_prc_lk_dtbo_partitions(platform)
+    if ok_lkdtbo and enabled:
+        log('scatter.lkdtbo_prc_enabled')
     time.sleep(3)
     apply_country_plan_to_proinfo(platform, change_plan)
     time.sleep(3)

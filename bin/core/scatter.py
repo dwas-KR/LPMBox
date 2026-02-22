@@ -3,7 +3,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 import shutil
 from datetime import datetime
-from .constants import IMAGE_DIR, LOGS_DIR
+from .constants import IMAGE_DIR, LOGS_DIR, LK_DTBO_DIR, LK_DTBO_FILES
 from .utils import log
 from .xml_crypto import decrypt_scatter_x
 
@@ -231,6 +231,53 @@ def prepare_platform_scatter(platform: str, keep_user_data: bool) -> Path | None
     _cleanup_temp_scatter(xml_path, ab_path)
     return final_path
 
+
+
+def copy_prc_lk_dtbo_to_image() -> bool:
+    try:
+        IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    for name in ('lk.img', 'dtbo.img'):
+        try:
+            p = IMAGE_DIR / name
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
+    ok = True
+    for name in LK_DTBO_FILES:
+        src = LK_DTBO_DIR / name
+        dst = IMAGE_DIR / name
+        if not src.is_file():
+            ok = False
+            continue
+        try:
+            shutil.copy2(src, dst)
+        except Exception:
+            ok = False
+    return ok
+
+def enable_prc_lk_dtbo_partitions(platform: str) -> bool:
+    scatter_xml = IMAGE_DIR / f'{platform}_Android_scatter.xml'
+    if not scatter_xml.is_file():
+        return False
+    try:
+        tree = ET.parse(scatter_xml)
+    except ET.ParseError:
+        return False
+    root = tree.getroot()
+    updated = False
+    for part, name in _iter_partitions(root):
+        low = name.lower()
+        if low in {'lk_a', 'lk_b', 'dtbo_a', 'dtbo_b'}:
+            _ensure_child_text(part, 'file_name', name)
+            _ensure_child_text(part, 'is_download', 'true')
+            _ensure_child_text(part, 'is_upgradable', 'true')
+            updated = True
+    if updated:
+        tree.write(scatter_xml, encoding='utf-8', xml_declaration=True)
+    return updated
 def disable_lk_dtbo_partitions(platform: str) -> None:
     for name in ('lk.img', 'dtbo.img', 'lk_a', 'lk_b', 'dtbo_a', 'dtbo_b'):
         path = IMAGE_DIR / name

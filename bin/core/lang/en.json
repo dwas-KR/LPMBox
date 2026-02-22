@@ -133,5 +133,10 @@
   "flow.fastboot_not_detected": "[!] Fastboot mode was not detected. Please check whether the device has entered fastboot.",
   "country.unknown_cable": "[!] The connected cable may be faulty, or the country code could not be detected!",
   "country.unknown_bootloop": "[!] If you ignore this warning and continue, the device may enter a 'boot loop' state!",
-  "flow.reboot_now": "[*] Rebooting the device."
+  "flow.reboot_now": "[*] Rebooting the device.",
+  "dl.lkdtbo_downloading": "[*] Downloading PRC-only lk, dtbo.zip...",
+  "dl.lkdtbo_extracting": "[*] Extracting PRC-only lk, dtbo.zip...",
+  "dl.lkdtbo_ready": "[+] PRC-only lk, dtbo is ready.",
+  "dl.lkdtbo_missing_after_extract": "[!] Required files were not found after extracting lk, dtbo.zip.",
+  "scatter.lkdtbo_prc_enabled": "[+] Enabled PRC lk/dtbo partitions in scatter."
 }

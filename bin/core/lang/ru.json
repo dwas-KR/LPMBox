@@ -133,5 +133,10 @@
   "flow.fastboot_not_detected": "[!] Режим fastboot не обнаружен. Проверьте, перешло ли устройство в fastboot.",
   "country.unknown_cable": "[!] Возможно, подключённый кабель неисправен или код страны не удалось определить!",
   "country.unknown_bootloop": "[!] Если проигнорировать это предупреждение и продолжить, устройство может уйти в «бутлуп» (бесконечную перезагрузку)!",
-  "flow.reboot_now": "[*] Перезагрузка устройства."
+  "flow.reboot_now": "[*] Перезагрузка устройства.",
+  "dl.lkdtbo_downloading": "[*] Загрузка lk, dtbo.zip (только PRC)...",
+  "dl.lkdtbo_extracting": "[*] Распаковка lk, dtbo.zip (только PRC)...",
+  "dl.lkdtbo_ready": "[+] PRC lk/dtbo готово.",
+  "dl.lkdtbo_missing_after_extract": "[!] Не удалось найти нужные файлы после распаковки lk, dtbo.zip.",
+  "scatter.lkdtbo_prc_enabled": "[+] В scatter включена установка разделов PRC lk/dtbo."
 }

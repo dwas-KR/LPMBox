@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from .constants import TOOLS_DIR, TOOLS_DOWNLOAD_DIR, PLATFORM_TOOLS_DIR, PLATFORM_TOOLS_URLS, SPFT_ZIP_URLS, PYTHON_DIR, PYTHON_VERSION, PYTHON_EMBED_URL_TEMPLATE, PYTHON_PTH_FILENAME, GET_PIP_URL, REQUIRED_PYTHON_PACKAGES, SPFT_EXE
+from .constants import TOOLS_DIR, TOOLS_DOWNLOAD_DIR, PLATFORM_TOOLS_DIR, PLATFORM_TOOLS_URLS, SPFT_ZIP_URLS, PYTHON_DIR, PYTHON_VERSION, PYTHON_EMBED_URL_TEMPLATE, PYTHON_PTH_FILENAME, GET_PIP_URL, REQUIRED_PYTHON_PACKAGES, SPFT_EXE, LK_DTBO_ZIP_URLS, LK_DTBO_DIR, LK_DTBO_ZIP_NAME, LK_DTBO_FILES
 from .utils import log
  
 def _download_file(url: str, dest: Path) -> None:
@@ -143,6 +143,78 @@ def ensure_spflashtool() -> bool:
         return True
     log('dl.spft_missing_after_extract')
     return False
+
+
+def _normalize_lk_dtbo_extract(dest_dir: Path) -> None:
+    if not dest_dir.is_dir():
+        return
+    items = [p for p in dest_dir.iterdir()]
+    if len(items) == 1 and items[0].is_dir():
+        inner = items[0]
+        for child in inner.iterdir():
+            try:
+                shutil.move(str(child), str(dest_dir / child.name))
+            except Exception:
+                pass
+        try:
+            shutil.rmtree(inner)
+        except Exception:
+            pass
+
+def _ensure_lk_dtbo_filenames(dest_dir: Path) -> None:
+    for name in LK_DTBO_FILES:
+        direct = dest_dir / name
+        if direct.is_file():
+            continue
+        alt = dest_dir / f"{name}.img"
+        if alt.is_file():
+            try:
+                alt.rename(direct)
+            except Exception:
+                try:
+                    shutil.copy2(alt, direct)
+                except Exception:
+                    pass
+
+def ensure_lk_dtbo() -> bool:
+    ok = True
+    for name in LK_DTBO_FILES:
+        if not (LK_DTBO_DIR / name).is_file():
+            ok = False
+            break
+    if ok:
+        log('dl.lkdtbo_ready')
+        return True
+    zip_path = TOOLS_DOWNLOAD_DIR / LK_DTBO_ZIP_NAME
+    log('dl.lkdtbo_downloading')
+    try:
+        _download_from_list(LK_DTBO_ZIP_URLS, zip_path)
+    except Exception:
+        log('dl.download_failed')
+        return False
+    log('dl.lkdtbo_extracting')
+    try:
+        if LK_DTBO_DIR.exists():
+            shutil.rmtree(LK_DTBO_DIR)
+    except Exception:
+        pass
+    try:
+        LK_DTBO_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    try:
+        _extract_zip(zip_path, LK_DTBO_DIR)
+        _normalize_lk_dtbo_extract(LK_DTBO_DIR)
+        _ensure_lk_dtbo_filenames(LK_DTBO_DIR)
+    except Exception:
+        log('dl.download_failed')
+        return False
+    for name in LK_DTBO_FILES:
+        if not (LK_DTBO_DIR / name).is_file():
+            log('dl.lkdtbo_missing_after_extract')
+            return False
+    log('dl.lkdtbo_ready')
+    return True
 
 def ensure_cryptography() -> bool:
     log('dl.check_crypto')

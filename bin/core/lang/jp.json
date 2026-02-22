@@ -132,5 +132,10 @@
   "flow.fastboot_not_detected": "[!] fastboot モードが検出されませんでした。端末が fastboot モードに入っているか確認してください。",
   "country.unknown_cable": "[!] 接続されているケーブルが不良か、国コードを検出できませんでした。",
   "country.unknown_bootloop": "[!] この警告を無視して進めると、端末が「ブートループ」状態になる可能性があります。",
-  "flow.reboot_now": "[*] デバイスを再起動します。"
+  "flow.reboot_now": "[*] デバイスを再起動します。",
+  "dl.lkdtbo_downloading": "[*] PRC専用 lk, dtbo.zip をダウンロード中です...",
+  "dl.lkdtbo_extracting": "[*] PRC専用 lk, dtbo.zip を展開中です...",
+  "dl.lkdtbo_ready": "[+] PRC専用 lk, dtbo の準備が完了しました。",
+  "dl.lkdtbo_missing_after_extract": "[!] lk, dtbo.zip の展開後に必要なファイルが見つかりません。",
+  "scatter.lkdtbo_prc_enabled": "[+] scatterでPRC専用 lk/dtbo パーティションの書き込みを有効化しました。"
 }
