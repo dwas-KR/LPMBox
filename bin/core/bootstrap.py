@@ -300,14 +300,6 @@ def main() -> None:
     log('bootstrap.start')
     downloader.ensure_platform_tools()
     downloader.ensure_spflashtool()
-    ok_lkdtbo = downloader.ensure_lk_dtbo()
-    if not ok_lkdtbo:
-        try:
-            input(get_string('app.press_enter'))
-        except EOFError:
-            pass
-        kill_adb_server()
-        return
     ok_crypto = downloader.ensure_cryptography()
     if not ok_crypto:
         try:

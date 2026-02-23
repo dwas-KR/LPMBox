@@ -115,7 +115,7 @@
   "scatter.create_ab": "[*] Creating Android_scatter_A,B.xml...",
   "scatter.final_saved": "[+] Final scatter file saved",
   "scatter.found_x": "[+] Found encrypted scatter",
-  "scatter.lk_dtbo_disabled": "[+] Disabled lk/dtbo partitions in scatter (they will not be flashed).",
+  "scatter.lk_dtbo_disabled": "[+] Disabled lk/dtbo partition flashing in scatter.",
   "scatter.not_found": "[!] image folder is missing or some files are missing. Please check that the image folder is correct.",
   "scatter.proinfo_not_found": "[!] proinfo file not found.",
   "scatter.temp_cleanup": "[*] Cleaning up temporary scatter files...",
@@ -134,9 +134,13 @@
   "country.unknown_cable": "[!] The connected cable may be faulty, or the country code could not be detected!",
   "country.unknown_bootloop": "[!] If you ignore this warning and continue, the device may enter a 'boot loop' state!",
   "flow.reboot_now": "[*] Rebooting the device.",
-  "dl.lkdtbo_downloading": "[*] Downloading PRC-only lk, dtbo.zip...",
-  "dl.lkdtbo_extracting": "[*] Extracting PRC-only lk, dtbo.zip...",
-  "dl.lkdtbo_ready": "[+] PRC-only lk, dtbo is ready.",
-  "dl.lkdtbo_missing_after_extract": "[!] Required files were not found after extracting lk, dtbo.zip.",
-  "scatter.lkdtbo_prc_enabled": "[+] Enabled PRC lk/dtbo partitions in scatter."
+  "flow.android_version_detecting": "[+] Detecting Android version...",
+  "flow.android_version_detected": "[+] Detected Android version: {version}",
+  "flow.android_version_low": "[!] Your Android version is too low. Please update to the latest version and try again!",
+  "flow.lkdtbo_downloading": "[*] Downloading model-specific lk, dtbo.zip...",
+  "flow.lkdtbo_extracting": "[*] Extracting lk, dtbo.zip...",
+  "flow.lkdtbo_ready": "[+] PRC lk, dtbo files are ready.",
+  "flow.model_not_supported": "[!] This model is not supported by LPMBOX!",
+  "flow.model_detecting": "[*] Detecting device model...",
+  "scatter.lk_dtbo_enabled": "[+] Enabled PRC lk/dtbo partition flashing in scatter."
 }

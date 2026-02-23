@@ -3,7 +3,9 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 import shutil
 from datetime import datetime
-from .constants import IMAGE_DIR, LOGS_DIR, LK_DTBO_DIR, LK_DTBO_FILES
+from .constants import IMAGE_DIR, LOGS_DIR, LKDTBO_MODEL_TO_ZIP
+from .adb_utils import adb_shell_getprop
+from . import adb_utils as adb_state
 from .utils import log
 from .xml_crypto import decrypt_scatter_x
 
@@ -63,6 +65,16 @@ def _ensure_child_text(parent: ET.Element, tag: str, text: str | None = None) ->
     if text is not None:
         elem.text = text
     return elem
+
+
+def _get_text(parent: ET.Element, tag: str) -> str:
+    elem = parent.find(tag)
+    if elem is None or elem.text is None:
+        return ''
+    return elem.text.strip()
+
+def _set_text(parent: ET.Element, tag: str, text: str) -> ET.Element:
+    return _ensure_child_text(parent, tag, text)
 
 
 
@@ -231,79 +243,42 @@ def prepare_platform_scatter(platform: str, keep_user_data: bool) -> Path | None
     _cleanup_temp_scatter(xml_path, ab_path)
     return final_path
 
-
-
-def copy_prc_lk_dtbo_to_image() -> bool:
-    try:
-        IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+def disable_lk_dtbo_partitions(platform: str) -> None:
     for name in ('lk.img', 'dtbo.img'):
-        try:
-            p = IMAGE_DIR / name
-            if p.exists():
-                p.unlink()
-        except Exception:
-            pass
-    ok = True
-    for name in LK_DTBO_FILES:
-        src = LK_DTBO_DIR / name
-        dst = IMAGE_DIR / name
-        if not src.is_file():
-            ok = False
-            continue
-        try:
-            shutil.copy2(src, dst)
-        except Exception:
-            ok = False
-    return ok
-
-def enable_prc_lk_dtbo_partitions(platform: str) -> bool:
+        path = IMAGE_DIR / name
+        if path.exists():
+            try:
+                path.unlink()
+            except OSError:
+                pass
     scatter_xml = IMAGE_DIR / f'{platform}_Android_scatter.xml'
     if not scatter_xml.is_file():
-        return False
-    try:
-        tree = ET.parse(scatter_xml)
-    except ET.ParseError:
-        return False
+        return
+    raw_model = getattr(adb_state, 'LAST_DEVICE_MODEL', '') or ''
+    if not raw_model:
+        try:
+            raw_model = adb_shell_getprop('ro.product.model').strip()
+        except Exception:
+            raw_model = ''
+    model = None
+    for key in LKDTBO_MODEL_TO_ZIP.keys():
+        if key in raw_model:
+            model = key
+            break
+    enable = model in {'TB375FC', 'TB373FU'}
+    tree = ET.parse(scatter_xml)
     root = tree.getroot()
     updated = False
     for part, name in _iter_partitions(root):
         low = name.lower()
         if low in {'lk_a', 'lk_b', 'dtbo_a', 'dtbo_b'}:
-            _ensure_child_text(part, 'file_name', name)
-            _ensure_child_text(part, 'is_download', 'true')
-            _ensure_child_text(part, 'is_upgradable', 'true')
+            _set_text(part, 'file_name', name)
+            _set_text(part, 'is_download', 'true' if enable else 'false')
+            _set_text(part, 'is_upgradable', 'true' if enable else 'false')
             updated = True
     if updated:
         tree.write(scatter_xml, encoding='utf-8', xml_declaration=True)
-    return updated
-def disable_lk_dtbo_partitions(platform: str) -> None:
-    for name in ('lk.img', 'dtbo.img', 'lk_a', 'lk_b', 'dtbo_a', 'dtbo_b'):
-        path = IMAGE_DIR / name
-        try:
-            if path.exists():
-                path.unlink()
-        except OSError:
-            continue
-    scatter_xml = IMAGE_DIR / f'{platform}_Android_scatter.xml'
-    if not scatter_xml.is_file():
-        return
-    try:
-        tree = ET.parse(scatter_xml)
-    except ET.ParseError:
-        return
-    root = tree.getroot()
-    updated = False
-    for part, name in _iter_partitions(root):
-        low = name.lower()
-        if low in {'lk', 'lk_a', 'lk_b', 'dtbo', 'dtbo_a', 'dtbo_b'}:
-            _ensure_child_text(part, 'is_download', 'false')
-            _ensure_child_text(part, 'is_upgradable', 'false')
-            updated = True
-    if updated:
-        tree.write(scatter_xml, encoding='utf-8', xml_declaration=True)
-        log('scatter.lk_dtbo_disabled', path=str(scatter_xml))
+        log('scatter.lk_dtbo_enabled' if enable else 'scatter.lk_dtbo_disabled', path=str(scatter_xml))
 
 
 def backup_platform_scatter_to_logs(platform: str) -> None:

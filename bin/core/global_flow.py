@@ -2,29 +2,25 @@ from __future__ import annotations
 from pathlib import Path
 import time
 import subprocess
+import shutil
 import re
 from datetime import datetime
 from xml.etree import ElementTree as ET
 from .adb_utils import adb_reboot, adb_shell_getprop, kill_adb_server
-from .constants import FLASH_XML_DLAGENT, FLASH_XML_ROOT, IMAGE_DIR, READBACK_DIR, TOOLS_DIR, PLATFORM_TOOLS_DIR
+from . import adb_utils as adb_state
+from . import downloader
+from .constants import FLASH_XML_DLAGENT, FLASH_XML_ROOT, IMAGE_DIR, READBACK_DIR, TOOLS_DIR, PLATFORM_TOOLS_DIR, LKDTBO_DIR, LKDTBO_MODEL_TO_ZIP
 from .flash_spft import launch_spft_gui, run_firmware_upgrade
 from .i18n import get_string
 from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
-from .scatter import prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs, copy_prc_lk_dtbo_to_image, enable_prc_lk_dtbo_partitions
+from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs
 from .utils import clear_console, log, wait_for_device, _write_log_line, run_adb, run_cmd
  
 def _cleanup_before_flow() -> None:
     for path in IMAGE_DIR.glob('*_Android_scatter.xml'):
         try:
             path.unlink()
-        except OSError:
-            pass
-    for name in ('lk.img', 'dtbo.img'):
-        try:
-            p = IMAGE_DIR / name
-            if p.exists():
-                p.unlink()
         except OSError:
             pass
     if READBACK_DIR.is_dir():
@@ -39,6 +35,15 @@ def _cleanup_before_flow() -> None:
             history.unlink()
         except OSError:
             pass
+
+    for name in ('lk.img', 'dtbo.img'):
+        p = IMAGE_DIR / name
+        if p.exists():
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
 
 def _delete_history_ini() -> None:
     history_path = TOOLS_DIR / 'history.ini'
@@ -80,13 +85,6 @@ def _cleanup_after_flow(platform: str | None=None) -> None:
             path.unlink()
         except OSError:
             pass
-    for name in ('lk.img', 'dtbo.img'):
-        try:
-            p = IMAGE_DIR / name
-            if p.exists():
-                p.unlink()
-        except OSError:
-            pass
     if READBACK_DIR.is_dir():
         for path in READBACK_DIR.glob('proinfo*'):
             try:
@@ -96,6 +94,22 @@ def _cleanup_after_flow(platform: str | None=None) -> None:
 
 def _detect_platform() -> str | None:
     log('flow.detect_platform')
+    log('flow.android_version_detecting')
+    version = adb_shell_getprop('ro.build.version.release').strip()
+    adb_state.LAST_ANDROID_VERSION_RELEASE = version
+    v_num = None
+    if version:
+        m = re.match(r'(\d+)', version)
+        if m:
+            try:
+                v_num = int(m.group(1))
+            except Exception:
+                v_num = None
+    if v_num is not None and v_num <= 14:
+        log('flow.android_version_detected', version=version)
+        log('flow.android_version_low')
+        kill_adb_server()
+        return None
     platform = adb_shell_getprop('ro.vendor.mediatek.platform').strip()
     if not platform or not platform.startswith('MT'):
         log('flow.not_mtk')
@@ -111,6 +125,83 @@ def _log_device_extra_info() -> None:
     if not cpu:
         cpu = '?'
     log('flow.device_info_value', hw=hw, cpu=cpu)
+    version = adb_state.LAST_ANDROID_VERSION_RELEASE
+    if not version:
+        version = adb_shell_getprop('ro.build.version.release').strip()
+        adb_state.LAST_ANDROID_VERSION_RELEASE = version
+    if version:
+        log('flow.android_version_detected', version=version)
+
+
+def _prepare_prc_lkdtbo_files() -> bool:
+    log('flow.model_detecting')
+    raw_model = adb_shell_getprop('ro.product.model').strip()
+    adb_state.LAST_DEVICE_MODEL = raw_model
+    model = None
+    for key in LKDTBO_MODEL_TO_ZIP.keys():
+        if key in raw_model:
+            model = key
+            break
+
+    for name in ('lk_a', 'lk_b', 'dtbo_a', 'dtbo_b'):
+        p = IMAGE_DIR / name
+        if p.exists():
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+    if LKDTBO_DIR.exists():
+        try:
+            shutil.rmtree(LKDTBO_DIR, ignore_errors=True)
+        except Exception:
+            pass
+
+    if model is not None:
+        dl_dir = TOOLS_DIR / 'download files'
+        zip_name = LKDTBO_MODEL_TO_ZIP.get(model)
+        if zip_name:
+            zp = dl_dir / zip_name
+            if zp.exists():
+                try:
+                    zp.unlink()
+                except OSError:
+                    pass
+
+    if model is None:
+        log('flow.model_not_supported')
+        kill_adb_server()
+        return False
+
+    if model in {'TB365FC', 'TB361FU', 'TB335FC', 'TB336FU'}:
+        return True
+
+    if model not in {'TB375FC', 'TB373FU'}:
+        log('flow.model_not_supported')
+        kill_adb_server()
+        return False
+
+    log('flow.lkdtbo_downloading')
+    zip_path = downloader.ensure_lkdtbo_zip_for_model(model)
+    if zip_path is None or not zip_path.is_file():
+        return False
+    log('flow.lkdtbo_extracting')
+    ok = downloader.extract_lkdtbo_zip(zip_path, LKDTBO_DIR)
+    if not ok:
+        return False
+    LKDTBO_DIR.mkdir(parents=True, exist_ok=True)
+    for name in ('lk_a', 'lk_b', 'dtbo_a', 'dtbo_b'):
+        src = LKDTBO_DIR / name
+        if not src.is_file():
+            return False
+        dst = IMAGE_DIR / name
+        try:
+            shutil.copy2(src, dst)
+        except Exception:
+            return False
+    log('flow.lkdtbo_ready')
+    return True
+
 
 def _find_flash_xml() -> Path | None:
     candidates = [FLASH_XML_ROOT, FLASH_XML_DLAGENT]
@@ -252,6 +343,9 @@ def run_global_firmware_upgrade_flow() -> None:
     if not _check_flash_xml_platform(platform):
         return
     time.sleep(3)
+    if not _prepare_prc_lkdtbo_files():
+        return
+    time.sleep(3)
     change_plan = _ask_country_change_plan()
     time.sleep(3)
     log('flow.scatter_prepare')
@@ -259,10 +353,7 @@ def run_global_firmware_upgrade_flow() -> None:
     if scatter_path is None:
         return
     time.sleep(3)
-    ok_lkdtbo = copy_prc_lk_dtbo_to_image()
-    enabled = enable_prc_lk_dtbo_partitions(platform)
-    if ok_lkdtbo and enabled:
-        log('scatter.lkdtbo_prc_enabled')
+    disable_lk_dtbo_partitions(platform)
     time.sleep(3)
     apply_country_plan_to_proinfo(platform, change_plan)
     time.sleep(3)

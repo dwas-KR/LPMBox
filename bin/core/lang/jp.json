@@ -115,7 +115,7 @@
   "scatter.create_ab": "[*] Android_scatter_A,B.xml ファイルを作成中...",
   "scatter.final_saved": "[+] 最終 scatter ファイルを保存しました。",
   "scatter.found_x": "[+] 暗号化されたスキャッターを検出しました。",
-  "scatter.lk_dtbo_disabled": "[+] scatter 内の lk/dtbo パーティションを無効化しました (これらのパーティションはフラッシュされません)。",
+  "scatter.lk_dtbo_disabled": "[+] scatterでlk/dtboパーティションのインストールを無効化しました。",
   "scatter.not_found": "[!] image フォルダが存在しないか、一部のファイルが欠落しています。image フォルダが正しいか確認してください。",
   "scatter.proinfo_not_found": "[!] proinfo ファイルが見つかりません。",
   "scatter.temp_cleanup": "[*] 一時 scatter ファイルを削除中...",
@@ -133,9 +133,13 @@
   "country.unknown_cable": "[!] 接続されているケーブルが不良か、国コードを検出できませんでした。",
   "country.unknown_bootloop": "[!] この警告を無視して進めると、端末が「ブートループ」状態になる可能性があります。",
   "flow.reboot_now": "[*] デバイスを再起動します。",
-  "dl.lkdtbo_downloading": "[*] PRC専用 lk, dtbo.zip をダウンロード中です...",
-  "dl.lkdtbo_extracting": "[*] PRC専用 lk, dtbo.zip を展開中です...",
-  "dl.lkdtbo_ready": "[+] PRC専用 lk, dtbo の準備が完了しました。",
-  "dl.lkdtbo_missing_after_extract": "[!] lk, dtbo.zip の展開後に必要なファイルが見つかりません。",
-  "scatter.lkdtbo_prc_enabled": "[+] scatterでPRC専用 lk/dtbo パーティションの書き込みを有効化しました。"
+  "flow.android_version_detecting": "[+] Android バージョンを検出しています...",
+  "flow.android_version_detected": "[+] 検出された Android バージョンです: {version}",
+  "flow.android_version_low": "[!] 端末のバージョンが低すぎます。最新バージョンに更新してから再試行してください！",
+  "flow.lkdtbo_downloading": "[*] モデルに合った lk, dtbo.zip をダウンロードしています...",
+  "flow.lkdtbo_extracting": "[*] lk, dtbo.zip を展開しています...",
+  "flow.lkdtbo_ready": "[+] PRC 専用 lk, dtbo ファイルの準備が完了しました。",
+  "flow.model_not_supported": "[!] このモデルでは LPMBOX を使用できません！",
+  "flow.model_detecting": "[*] モデル名を検出しています...",
+  "scatter.lk_dtbo_enabled": "[+] scatterでPRC専用lk/dtboパーティションのインストールを有効化しました。"
 }

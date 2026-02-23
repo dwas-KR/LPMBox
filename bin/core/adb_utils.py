@@ -1,6 +1,9 @@
 import subprocess
 from pathlib import Path
 from .constants import PLATFORM_TOOLS_DIR
+LAST_ANDROID_VERSION_RELEASE = ''
+LAST_DEVICE_MODEL = ''
+
  
 def _adb_path() -> str:
     adb = PLATFORM_TOOLS_DIR / 'adb.exe'

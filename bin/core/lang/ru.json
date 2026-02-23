@@ -115,7 +115,7 @@
   "scatter.create_ab": "[*] Создание файла Android_scatter_A,B.xml...",
   "scatter.final_saved": "[+] Итоговый файл scatter сохранён.",
   "scatter.found_x": "[+] Найден зашифрованный scatter.",
-  "scatter.lk_dtbo_disabled": "[+] Разделы lk/dtbo в scatter отключены (они не будут прошиваться).",
+  "scatter.lk_dtbo_disabled": "[+] В scatter отключена установка разделов lk/dtbo.",
   "scatter.not_found": "[!] Папка image отсутствует или некоторые файлы отсутствуют. Проверьте правильность папки image.",
   "scatter.proinfo_not_found": "[!] Файл proinfo не найден.",
   "scatter.temp_cleanup": "[*] Очистка временных файлов scatter...",
@@ -134,9 +134,13 @@
   "country.unknown_cable": "[!] Возможно, подключённый кабель неисправен или код страны не удалось определить!",
   "country.unknown_bootloop": "[!] Если проигнорировать это предупреждение и продолжить, устройство может уйти в «бутлуп» (бесконечную перезагрузку)!",
   "flow.reboot_now": "[*] Перезагрузка устройства.",
-  "dl.lkdtbo_downloading": "[*] Загрузка lk, dtbo.zip (только PRC)...",
-  "dl.lkdtbo_extracting": "[*] Распаковка lk, dtbo.zip (только PRC)...",
-  "dl.lkdtbo_ready": "[+] PRC lk/dtbo готово.",
-  "dl.lkdtbo_missing_after_extract": "[!] Не удалось найти нужные файлы после распаковки lk, dtbo.zip.",
-  "scatter.lkdtbo_prc_enabled": "[+] В scatter включена установка разделов PRC lk/dtbo."
+  "flow.android_version_detecting": "[+] Определение версии Android...",
+  "flow.android_version_detected": "[+] Обнаруженная версия Android: {version}",
+  "flow.android_version_low": "[!] Версия Android на устройстве слишком низкая. Обновите устройство до последней версии и попробуйте снова!",
+  "flow.lkdtbo_downloading": "[*] Загрузка lk, dtbo.zip для вашей модели...",
+  "flow.lkdtbo_extracting": "[*] Распаковка lk, dtbo.zip...",
+  "flow.lkdtbo_ready": "[+] Файлы PRC lk/dtbo готовы.",
+  "flow.model_not_supported": "[!] Эта модель не поддерживается LPMBOX!",
+  "flow.model_detecting": "[*] Определяем модель устройства...",
+  "scatter.lk_dtbo_enabled": "[+] В scatter включена установка PRC‑файлов lk/dtbo."
 }

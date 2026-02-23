@@ -2,10 +2,11 @@ import platform
 import shutil
 import subprocess
 import zipfile
+import tempfile
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from .constants import TOOLS_DIR, TOOLS_DOWNLOAD_DIR, PLATFORM_TOOLS_DIR, PLATFORM_TOOLS_URLS, SPFT_ZIP_URLS, PYTHON_DIR, PYTHON_VERSION, PYTHON_EMBED_URL_TEMPLATE, PYTHON_PTH_FILENAME, GET_PIP_URL, REQUIRED_PYTHON_PACKAGES, SPFT_EXE, LK_DTBO_ZIP_URLS, LK_DTBO_DIR, LK_DTBO_ZIP_NAME, LK_DTBO_FILES
+from .constants import TOOLS_DIR, TOOLS_DOWNLOAD_DIR, PLATFORM_TOOLS_DIR, PLATFORM_TOOLS_URLS, SPFT_ZIP_URLS, PYTHON_DIR, PYTHON_VERSION, PYTHON_EMBED_URL_TEMPLATE, PYTHON_PTH_FILENAME, GET_PIP_URL, REQUIRED_PYTHON_PACKAGES, SPFT_EXE, LKDTBO_DIR, LKDTBO_MODEL_TO_ZIP, LKDTBO_GITHUB_COMMIT
 from .utils import log
  
 def _download_file(url: str, dest: Path) -> None:
@@ -144,78 +145,6 @@ def ensure_spflashtool() -> bool:
     log('dl.spft_missing_after_extract')
     return False
 
-
-def _normalize_lk_dtbo_extract(dest_dir: Path) -> None:
-    if not dest_dir.is_dir():
-        return
-    items = [p for p in dest_dir.iterdir()]
-    if len(items) == 1 and items[0].is_dir():
-        inner = items[0]
-        for child in inner.iterdir():
-            try:
-                shutil.move(str(child), str(dest_dir / child.name))
-            except Exception:
-                pass
-        try:
-            shutil.rmtree(inner)
-        except Exception:
-            pass
-
-def _ensure_lk_dtbo_filenames(dest_dir: Path) -> None:
-    for name in LK_DTBO_FILES:
-        direct = dest_dir / name
-        if direct.is_file():
-            continue
-        alt = dest_dir / f"{name}.img"
-        if alt.is_file():
-            try:
-                alt.rename(direct)
-            except Exception:
-                try:
-                    shutil.copy2(alt, direct)
-                except Exception:
-                    pass
-
-def ensure_lk_dtbo() -> bool:
-    ok = True
-    for name in LK_DTBO_FILES:
-        if not (LK_DTBO_DIR / name).is_file():
-            ok = False
-            break
-    if ok:
-        log('dl.lkdtbo_ready')
-        return True
-    zip_path = TOOLS_DOWNLOAD_DIR / LK_DTBO_ZIP_NAME
-    log('dl.lkdtbo_downloading')
-    try:
-        _download_from_list(LK_DTBO_ZIP_URLS, zip_path)
-    except Exception:
-        log('dl.download_failed')
-        return False
-    log('dl.lkdtbo_extracting')
-    try:
-        if LK_DTBO_DIR.exists():
-            shutil.rmtree(LK_DTBO_DIR)
-    except Exception:
-        pass
-    try:
-        LK_DTBO_DIR.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    try:
-        _extract_zip(zip_path, LK_DTBO_DIR)
-        _normalize_lk_dtbo_extract(LK_DTBO_DIR)
-        _ensure_lk_dtbo_filenames(LK_DTBO_DIR)
-    except Exception:
-        log('dl.download_failed')
-        return False
-    for name in LK_DTBO_FILES:
-        if not (LK_DTBO_DIR / name).is_file():
-            log('dl.lkdtbo_missing_after_extract')
-            return False
-    log('dl.lkdtbo_ready')
-    return True
-
 def ensure_cryptography() -> bool:
     log('dl.check_crypto')
     try:
@@ -238,3 +167,51 @@ def ensure_cryptography() -> bool:
     except Exception:
         log('dl.crypto_failed')
         return False
+
+
+def ensure_lkdtbo_zip_for_model(model: str) -> Path | None:
+    name = LKDTBO_MODEL_TO_ZIP.get(model)
+    if not name:
+        return None
+    dest = TOOLS_DOWNLOAD_DIR / name
+    if dest.is_file():
+        return dest
+    raw_url = f'https://raw.githubusercontent.com/dwas-KR/LPMBox/{LKDTBO_GITHUB_COMMIT}/{name}'
+    alt_url = f'https://github.com/dwas-KR/LPMBox/raw/{LKDTBO_GITHUB_COMMIT}/{name}'
+    try:
+        _download_from_list([raw_url, alt_url], dest)
+    except Exception:
+        return None
+    return dest
+
+def extract_lkdtbo_zip(zip_path: Path, dest_dir: Path | None=None) -> bool:
+    if dest_dir is None:
+        dest_dir = LKDTBO_DIR
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    targets = ['lk_a', 'lk_b', 'dtbo_a', 'dtbo_b']
+    for t in targets:
+        p = dest_dir / t
+        if p.exists():
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            _extract_zip(zip_path, tmp)
+            for t in targets:
+                found = None
+                for p in tmp.rglob('*'):
+                    if not p.is_file():
+                        continue
+                    n = p.name.lower()
+                    if n == t.lower() or n == f'{t}.img' or n == f'{t}.bin':
+                        found = p
+                        break
+                if found is None:
+                    return False
+                shutil.copy2(found, dest_dir / t)
+    except Exception:
+        return False
+    return True

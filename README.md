@@ -1,4 +1,4 @@
-# LPMBox
+# LPMBOX
 
 ![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)
 
@@ -14,7 +14,10 @@
 
 ## 1. Developer YouTube
 * Maintained by: **돠스 (dwas)**
-* [YouTube](http://www.youtube.com/@dwas_KR?sub_confirmation=1)
+* [Youtube Channel](https://www.youtube.com/@dwas_KR?sub_confirmation=1)
+* [Watch the video](https://youtu.be/M3hUF-AVJbM?si=CkAkY9Rv6jFtvQmm)
+  
+[![Watch the video](https://img.youtube.com/vi/M3hUF-AVJbM/0.jpg)](https://youtu.be/M3hUF-AVJbM?si=CkAkY9Rv6jFtvQmm)
 
 ---
 
@@ -24,6 +27,8 @@
 
 ### Languages
 * English / 한국어 / Русский / 日本語
+
+![Image](https://github.com/user-attachments/assets/5570ed64-2ce7-450d-b2e8-f2171a96dd94)
 
 ### Target models
 * Lenovo Xiaoxin Pad Pro 12.7 2025 2nd (TB375FC)
@@ -37,6 +42,8 @@
 ---
 
 ## 3. Menu (Functions)
+
+![Image](https://github.com/user-attachments/assets/9baa63dc-0dad-47db-bdcc-727ff56dd3bc)
 
 ### 3.1 Option 1: Switch PRC (CN) ↔ ROW (Global) Firmware [Data Wipe]
 Performs a clean install (factory reset). **All data will be erased.**  

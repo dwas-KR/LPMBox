@@ -19,13 +19,20 @@ LOGS_DIR = BASE_DIR / 'logs'
 LOG_ENV_VAR = 'MTK_LOG_FILE'
 PLATFORM_TOOLS_URLS = ['https://dl.google.com/android/repository/platform-tools-latest-windows.zip']
 SPFT_ZIP_URLS = ['https://spflashtools.com/wp-content/uploads/SP_Flash_Tool_V6.2404_Win.zip']
-LK_DTBO_ZIP_URLS = ['https://raw.githubusercontent.com/dwas-KR/LPMBox/ee91d89c65db184a3be7d23a9087bde768fbaa66/lk%2C%20dtbo.zip', 'https://github.com/dwas-KR/LPMBox/raw/ee91d89c65db184a3be7d23a9087bde768fbaa66/lk%2C%20dtbo.zip']
-LK_DTBO_DIR = TOOLS_DIR / 'lk, dtbo'
-LK_DTBO_ZIP_NAME = 'lk, dtbo.zip'
-LK_DTBO_FILES = ['lk_a', 'lk_b', 'dtbo_a', 'dtbo_b']
 PYTHON_VERSION = '3.14.2'
 PYTHON_EMBED_URL_TEMPLATE = 'https://www.python.org/ftp/python/{version}/python-{version}-embed-{arch}.zip'
 PYTHON_PTH_FILENAME = 'python314._pth'
 GET_PIP_URL = 'https://bootstrap.pypa.io/get-pip.py'
 REQUIRED_PYTHON_PACKAGES = ['cryptography']
-APP_VERSION = 'v1.5.0'
+APP_VERSION = 'v1.5.1'
+
+LKDTBO_DIR = TOOLS_DIR / 'lk, dtbo'
+LKDTBO_GITHUB_COMMIT = '508263f922357b3705d8590fc258b5ac35d07957'
+LKDTBO_MODEL_TO_ZIP = {
+    'TB375FC': 'TB375FC.zip',
+    'TB373FU': 'TB375FC.zip',
+    'TB365FC': 'TB365FC.zip',
+    'TB361FU': 'TB365FC.zip',
+    'TB335FC': 'TB335FC.zip',
+    'TB336FU': 'TB335FC.zip',
+}
