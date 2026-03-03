@@ -104,8 +104,14 @@ def _load_saved_language() -> str | None:
     try:
         data = _load_settings()
         code = data.get('language')
-        if isinstance(code, str) and code in ('ko', 'en', 'ru', 'jp'):
-            return code
+        if isinstance(code, str):
+            c = code.strip().lower()
+            if c in ('zh_tw', 'zh_hk'):
+                return 'zh_cn'
+            if c == 'en_au':
+                return 'en'
+            if c in ('ko', 'en', 'ru', 'jp', 'el', 'zh_cn', 'vi', 'ka', 'nl'):
+                return c
     except Exception:
         pass
     return None
@@ -121,23 +127,28 @@ def _save_language(code: str) -> None:
 
 
 def _choose_language(force_prompt: bool = False) -> None:
-    if not force_prompt:
-        saved = _load_saved_language()
-        if saved:
-            set_language(saved)
-            return
     options = [
         ('1', 'en', 'app.language_en'),
         ('2', 'ko', 'app.language_ko'),
         ('3', 'ru', 'app.language_ru'),
         ('4', 'jp', 'app.language_jp'),
+        ('5', 'zh_cn', 'app.language_zh_cn'),
+        ('6', 'vi', 'app.language_vi'),
+        ('7', 'el', 'app.language_el'),
+        ('8', 'ka', 'app.language_ka'),
+        ('9', 'nl', 'app.language_nl'),
     ]
+    if not force_prompt:
+        saved = _load_saved_language()
+        if saved:
+            set_language(saved)
+            return
     while True:
         try:
             menu = TerminalMenu(get_string('app.language_title'), breadcrumbs=get_string('breadcrumb.settings'))
             for key, _, text_key in options:
                 menu.add_option(key, get_string(text_key))
-            choice = menu.ask(prompt=get_string('app.language_prompt'), default_key='2')
+            choice = menu.ask(prompt=get_string('app.language_prompt'), default_key='1')
         except KeyboardInterrupt:
             code = 'ko'
             set_language(code)
