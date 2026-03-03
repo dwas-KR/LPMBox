@@ -26,7 +26,10 @@
 **LPMBox** is a helper tool designed to make PRC (CN) / ROW (Global) firmware operations easier on **MediaTek (MTK)-based Lenovo tablets**.
 
 ### Languages
-* English / 한국어 / Русский / 日本語
+English (en) / 한국어 (ko) / Русский (ru) / 日本語 (jp)
+繁體中文 (zh_cn) / Tiếng Việt (vi) / Ελληνικά (el)
+ქართული (ka) / Nederlands (nl)
+
 
 ![Image](https://github.com/user-attachments/assets/5570ed64-2ce7-450d-b2e8-f2171a96dd94)
 
