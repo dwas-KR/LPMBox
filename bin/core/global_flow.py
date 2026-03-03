@@ -62,8 +62,7 @@ def _ask_country_change_plan() -> bool:
         log("country.unknown_bootloop")
     while True:
         prompt = get_string("country.change_plan_prompt").format(code=code)
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        base = f"{timestamp} - {prompt}"
+        base = f"{prompt}"
         print(base, end="")
         raw = input().strip()
         line = f"{base}{raw}"
@@ -264,7 +263,6 @@ def _detect_current_ab_slot() -> str | None:
         if m:
             slot = m.group(1)
             break
-        # fallback: last a/b character in line
         for ch in reversed(line_lower):
             if ch in ("a", "b"):
                 slot = ch
@@ -308,19 +306,31 @@ def _switch_ab_slot_fastboot(current_slot: str | None) -> None:
         log("flow.ab_slot.skip")
         return
     slot_name = slot.upper()
-    if slot == "a":
+    assume_ok = slot == "a"
+    if assume_ok:
         log("flow.ab_slot.ok", slot=slot_name)
-        return
-    log("flow.ab_slot.switch", from_slot=slot_name, to_slot="A")
-    for base_cmd in ([str(PLATFORM_TOOLS_DIR / "fastboot")], ["fastboot"]):
-        try:
-            result = run_cmd(base_cmd + ["set_active", "a"])
-        except Exception:
-            continue
-        if getattr(result, "returncode", 0) == 0:
+    else:
+        log("flow.ab_slot.switch", from_slot=slot_name, to_slot="A")
+    success_any = assume_ok
+    for i in range(3):
+        ok = False
+        for base_cmd in ([str(PLATFORM_TOOLS_DIR / "fastboot")], ["fastboot"]):
+            try:
+                result = run_cmd(base_cmd + ["set_active", "a"])
+            except Exception:
+                continue
+            if getattr(result, "returncode", 0) == 0:
+                ok = True
+                break
+        if ok:
+            success_any = True
+        if i < 2:
+            time.sleep(2)
+    if not assume_ok:
+        if success_any:
             log("flow.ab_slot.switched", slot="A")
-            return
-    log("flow.ab_slot.error")
+        else:
+            log("flow.ab_slot.error")
     return
 
 

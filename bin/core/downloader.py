@@ -1,20 +1,108 @@
 import platform
+import sys
 import shutil
 import subprocess
 import zipfile
 import tempfile
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from .constants import TOOLS_DIR, TOOLS_DOWNLOAD_DIR, PLATFORM_TOOLS_DIR, PLATFORM_TOOLS_URLS, SPFT_ZIP_URLS, PYTHON_DIR, PYTHON_VERSION, PYTHON_EMBED_URL_TEMPLATE, PYTHON_PTH_FILENAME, GET_PIP_URL, REQUIRED_PYTHON_PACKAGES, SPFT_EXE, LKDTBO_DIR, LKDTBO_MODEL_TO_ZIP, LKDTBO_GITHUB_COMMIT
-from .utils import log
+from .utils import log, get_term_width
  
 def _download_file(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
     with urlopen(req, timeout=600) as resp:
+        total = 0
+        try:
+            total = int(resp.headers.get('Content-Length') or 0)
+        except Exception:
+            total = 0
+        done = 0
+        start = time.time()
+        last_draw = 0.0
+        ncols = get_term_width(145)
+
+        def fmt_bytes(n: int) -> str:
+            units = ['B', 'K', 'M', 'G', 'T']
+            v = float(n)
+            u = 0
+            while v >= 1024.0 and u < len(units) - 1:
+                v /= 1024.0
+                u += 1
+            if u == 0:
+                return f'{int(v)}{units[u]}'
+            if v >= 100:
+                return f'{v:.0f}{units[u]}'
+            if v >= 10:
+                return f'{v:.1f}{units[u]}'
+            return f'{v:.2f}{units[u]}'
+
+        def fmt_time(sec: float) -> str:
+            s = int(sec + 0.5)
+            m, s = divmod(s, 60)
+            h, m = divmod(m, 60)
+            if h > 0:
+                return f'{h:02d}:{m:02d}:{s:02d}'
+            return f'{m:02d}:{s:02d}'
+
+        def draw(final: bool = False) -> None:
+            nonlocal last_draw
+            now = time.time()
+            if (not final) and (now - last_draw) < 0.06:
+                return
+            last_draw = now
+            if total <= 0:
+                return
+            pct = done / total if total else 0.0
+            if pct < 0.0:
+                pct = 0.0
+            if pct > 1.0:
+                pct = 1.0
+            percent = int(pct * 100.0 + 0.5)
+            elapsed = now - start
+            rate = done / elapsed if elapsed > 0 else 0.0
+            remaining = (total - done) / rate if rate > 0 else 0.0
+            l_bar = f'{percent:3d}%|'
+            r_bar = f'| {fmt_bytes(done)}/{fmt_bytes(total)} [{fmt_time(elapsed)}<{fmt_time(remaining)}]'
+            bar_width = ncols - len(l_bar) - len(r_bar)
+            if bar_width < 10:
+                bar_width = 10
+            filled = int(bar_width * pct + 0.5)
+            if filled < 0:
+                filled = 0
+            if filled > bar_width:
+                filled = bar_width
+            bar = ('█' * filled) + (' ' * (bar_width - filled))
+            line = (l_bar + bar + r_bar).ljust(ncols)
+            try:
+                out = sys.stdout
+                prev = getattr(out, '_lpmbox_suppress_capture', False)
+                setattr(out, '_lpmbox_suppress_capture', True)
+                try:
+                    out.write('\r' + line)
+                    if final:
+                        out.write('\n')
+                    out.flush()
+                finally:
+                    setattr(out, '_lpmbox_suppress_capture', prev)
+            except Exception:
+                pass
+
         with dest.open('wb') as f:
-            shutil.copyfileobj(resp, f)
+            while True:
+                chunk = resp.read(1024 * 64)
+                if not chunk:
+                    break
+                f.write(chunk)
+                done += len(chunk)
+                draw(False)
+        if total > 0:
+            done = total
+            draw(True)
+
 
 def _download_from_list(urls: list[str], dest: Path) -> None:
     last_error: Exception | None = None

@@ -141,5 +141,11 @@
   "flow.lkdtbo_ready": "[+] PRC 専用 lk, dtbo ファイルの準備が完了しました。",
   "flow.model_not_supported": "[!] このモデルでは LPMBOX を使用できません！",
   "flow.model_detecting": "[*] モデル名を検出しています...",
-  "scatter.lk_dtbo_enabled": "[+] scatterでPRC専用lk/dtboパーティションのインストールを有効化しました。"
+  "scatter.lk_dtbo_enabled": "[+] scatterでPRC専用lk/dtboパーティションのインストールを有効化しました。",
+  "prompt.use_arrow_keys": "↑/↓で移動してEnterで選択（または番号/キー入力）。Esc=キャンセル",
+  "breadcrumb.main": "メイン",
+  "breadcrumb.settings": "設定",
+  "app.language_title": "言語選択",
+  "console.quickedit_warn": "QuickEdit モードが有効です。マウスで文字を選択すると停止したように見える場合があります。コンソールの設定で QuickEdit を無効にしてください。",
+  "update.avail_warning": "[!] 警告: 現在のファイルは旧バージョンです。最新版に更新してください！"
 }

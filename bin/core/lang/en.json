@@ -142,5 +142,11 @@
   "flow.lkdtbo_ready": "[+] PRC lk, dtbo files are ready.",
   "flow.model_not_supported": "[!] This model is not supported by LPMBOX!",
   "flow.model_detecting": "[*] Detecting device model...",
-  "scatter.lk_dtbo_enabled": "[+] Enabled PRC lk/dtbo partition flashing in scatter."
+  "scatter.lk_dtbo_enabled": "[+] Enabled PRC lk/dtbo partition flashing in scatter.",
+  "prompt.use_arrow_keys": "Use ↑/↓ and Enter (or type a number/key). Esc = cancel",
+  "breadcrumb.main": "Main",
+  "breadcrumb.settings": "Settings",
+  "app.language_title": "Language",
+  "console.quickedit_warn": "QuickEdit mode is enabled. If you select text with the mouse, the program may appear to freeze. Disable QuickEdit in the console properties.",
+  "update.avail_warning": "[!] Warning: This is an outdated version. Please update to the latest version!"
 }

@@ -142,5 +142,11 @@
   "flow.lkdtbo_ready": "[+] Файлы PRC lk/dtbo готовы.",
   "flow.model_not_supported": "[!] Эта модель не поддерживается LPMBOX!",
   "flow.model_detecting": "[*] Определяем модель устройства...",
-  "scatter.lk_dtbo_enabled": "[+] В scatter включена установка PRC‑файлов lk/dtbo."
+  "scatter.lk_dtbo_enabled": "[+] В scatter включена установка PRC‑файлов lk/dtbo.",
+  "prompt.use_arrow_keys": "Используйте ↑/↓ и Enter (или введите номер/клавишу). Esc = отмена",
+  "breadcrumb.main": "Главное",
+  "breadcrumb.settings": "Настройки",
+  "app.language_title": "Выбор языка",
+  "console.quickedit_warn": "Режим QuickEdit включён. Если выделить текст мышью, программа может выглядеть зависшей. Отключите QuickEdit в свойствах консоли.",
+  "update.avail_warning": "[!] Внимание: это устаревшая версия. Пожалуйста, обновите до последней версии!"
 }
