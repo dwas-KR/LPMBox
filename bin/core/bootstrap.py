@@ -137,6 +137,9 @@ def _choose_language(force_prompt: bool = False) -> None:
         ('7', 'el', 'app.language_el'),
         ('8', 'ka', 'app.language_ka'),
         ('9', 'nl', 'app.language_nl'),
+        ('10', 'hi', 'app.language_hi'),
+        ('11', 'ar', 'app.language_ar'),
+        ('12', 'es', 'app.language_es'),
     ]
     if not force_prompt:
         saved = _load_saved_language()

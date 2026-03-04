@@ -26,9 +26,11 @@
 **LPMBox** is a helper tool designed to make PRC (CN) / ROW (Global) firmware operations easier on **MediaTek (MTK)-based Lenovo tablets**.
 
 ### Languages
-* English / 한국어 / Русский / 日本語
+* English (en) / 한국어 (ko) / Русский (ru) / 日本語 (jp)
+* 繁體中文 (zh_cn) / Tiếng Việt (vi) / Ελληνικά (el) / हिन्दी (hi)
+* ქართული (ka) / Nederlands (nl) / العربية (ar) / Español (es)
 
-![Image](https://github.com/user-attachments/assets/5570ed64-2ce7-450d-b2e8-f2171a96dd94)
+![Image](https://github.com/user-attachments/assets/f476c6ad-5695-4ab2-9c54-2173b55c118d)
 
 ### Target models
 * Lenovo Xiaoxin Pad Pro 12.7 2025 2nd (TB375FC)
@@ -43,7 +45,7 @@
 
 ## 3. Menu (Functions)
 
-![Image](https://github.com/user-attachments/assets/9baa63dc-0dad-47db-bdcc-727ff56dd3bc)
+![Image](https://github.com/user-attachments/assets/b0ad0ba3-597a-4949-8409-522407eb9eb8)
 
 ### 3.1 Option 1: Switch PRC (CN) ↔ ROW (Global) Firmware [Data Wipe]
 Performs a clean install (factory reset). **All data will be erased.**  

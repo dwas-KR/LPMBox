@@ -36,7 +36,7 @@ def set_language(code: str) -> None:
         code = 'zh_cn'
     if code == 'en_au':
         code = 'en'
-    if code not in ('ko','en','ru','jp','el','zh_cn','vi','ka','nl'):
+    if code not in ('ko','en','ru','jp','el','zh_cn','vi','ka','nl','hi','ar','es'):
         code = _fallback_lang
     with _lang_lock:
         _current_lang = code

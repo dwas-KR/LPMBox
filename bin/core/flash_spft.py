@@ -3,6 +3,28 @@ from pathlib import Path
 from .constants import TOOLS_DIR, SPFT_EXE, FLASH_XML_DLAGENT, FLASH_XML_ROOT, DA_AUTH_DLAGENT, DA_AUTH_ROOT
 from .utils import log, log_text, _write_log_line, capture_spft_console_output_snapshot
 
+def _resolve_spft_exe() -> Path | None:
+    try:
+        p = SPFT_EXE
+        if p.is_file():
+            return p.resolve()
+    except Exception:
+        p = None
+    try:
+        alt = TOOLS_DIR / 'flash_tool.exe'
+        if alt.is_file():
+            return alt.resolve()
+    except Exception:
+        pass
+    try:
+        for name in ('SPFlashToolV6.exe', 'flash_tool.exe'):
+            for cand in TOOLS_DIR.rglob(name):
+                if cand.is_file():
+                    return cand.resolve()
+    except Exception:
+        pass
+    return None
+
 def _resolve_flash_xml() -> Path | None:
     if FLASH_XML_DLAGENT.is_file():
         return FLASH_XML_DLAGENT
@@ -72,19 +94,19 @@ def prepare_flash_files() -> bool:
     return True
 
 def launch_spft_gui() -> None:
-    exe = SPFT_EXE
-    if not exe.is_file():
+    exe = _resolve_spft_exe()
+    if exe is None or not exe.is_file():
         log('flash.no_spft')
         return
     try:
-        subprocess.Popen([str(exe)], cwd=str(TOOLS_DIR))
+        subprocess.Popen([str(exe.resolve())], cwd=str(TOOLS_DIR))
         log('flash.gui_started')
     except Exception:
         log('flash.no_spft')
 
 def run_firmware_upgrade() -> bool:
-    exe = SPFT_EXE
-    if not exe.is_file():
+    exe = _resolve_spft_exe()
+    if exe is None or not exe.is_file():
         log('flash.no_spft')
         return False
 

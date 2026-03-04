@@ -823,6 +823,7 @@ class TerminalMenu:
         except Exception:
             pass
 
+
     def ask(self, prompt: str | None = None, default_key: str | None = None) -> str:
         selectable = self._selectable_indexes()
         if not selectable:
