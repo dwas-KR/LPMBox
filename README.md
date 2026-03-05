@@ -33,9 +33,9 @@
 ![Image](https://github.com/user-attachments/assets/cbe60528-9d8e-47c7-955e-32947ecf2c00)
 
 ### Target models
-* Lenovo Xiaoxin Pad Pro 12.7 2025 2nd (TB375FC)
-* Lenovo Xiaoxin Pad 12.1 (TB365FC)
-* Lenovo Xiaoxin Pad 11 (TB335FC)
+* Lenovo Xiaoxin Pad Pro 2025 12.7 (TB375FC, TB373FU)
+* Lenovo Xiaoxin Pad 2025 12.1 (TB365FC, TB361FU)
+* Lenovo Xiaoxin Pad 2025 11 (TB335FC, TB336FU)
 * Other Lenovo tablets using MediaTek Dimensity chipsets
 
 > ⚠️ Note: Behavior may vary depending on device model, ROM, and SoC/platform.  
