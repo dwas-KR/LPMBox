@@ -155,5 +155,8 @@
   "breadcrumb.settings": "設定",
   "console.quickedit_warn": "QuickEdit モードが有効です。マウスで文字を選択すると停止したように見える場合があります。コンソールの設定で QuickEdit を無効にしてください。",
   "update.avail_warning": "[!] 警告: 現在のファイルは旧バージョンです。最新版に更新してください！",
-  "flow.ab_slot.ok": "[*] 現在のスロット値は正常です。(スロットAがすでに有効です)"
+  "flow.ab_slot.ok": "[*] 現在のスロット値は正常です。(スロットAがすでに有効です)",
+  "flow.keep_data.rom_type": "[*] 端末にインストールされているROMの種類: {region}",
+  "flow.keep_data.rom_row_ok": "[*] 端末の値がグローバルROM（ROW）のため、次のステップへ進みます。",
+  "flow.keep_data.rom_prc_warn": "[!] 警告: 端末の値が中国内需ROM（PRC）です。メインメニューの1番をお試しください！"
 }

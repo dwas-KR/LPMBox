@@ -156,5 +156,8 @@
   "breadcrumb.main": "الرئيسية",
   "breadcrumb.settings": "الإعدادات",
   "console.quickedit_warn": "وضع QuickEdit مفعّل. إذا قمت بتحديد نص بالماوس فقد يبدو البرنامج وكأنه تجمّد. عطّل QuickEdit في خصائص وحدة التحكم.",
-  "update.avail_warning": "[!] Warning: This is an outdated version. Please update to the latest version!"
+  "update.avail_warning": "[!] Warning: This is an outdated version. Please update to the latest version!",
+  "flow.keep_data.rom_type": "[*] نوع الروم المثبّت على الجهاز: {region}",
+  "flow.keep_data.rom_row_ok": "[*] الجهاز يعمل على الروم العالمي (ROW)، سأتجه إلى الخطوة التالية.",
+  "flow.keep_data.rom_prc_warn": "[!] تحذير: الجهاز يعمل على روم الصين (PRC). يرجى تجربة الخيار 1 من القائمة الرئيسية!"
 }

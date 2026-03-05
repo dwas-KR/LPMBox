@@ -156,5 +156,8 @@
   "breadcrumb.main": "Hoofdmenu",
   "breadcrumb.settings": "Instellingen",
   "console.quickedit_warn": "QuickEdit staat aan. Als je tekst selecteert met de muis, kan het lijken alsof het programma vastloopt. Schakel QuickEdit uit in de console-eigenschappen.",
-  "update.avail_warning": "[!] Waarschuwing: Dit is een verouderde versie. Werk bij naar de nieuwste versie!"
+  "update.avail_warning": "[!] Waarschuwing: Dit is een verouderde versie. Werk bij naar de nieuwste versie!",
+  "flow.keep_data.rom_type": "[*] Geïnstalleerd ROM-type op het apparaat: {region}",
+  "flow.keep_data.rom_row_ok": "[*] Het apparaat draait op de Global ROM (ROW). Ik ga door naar de volgende stap.",
+  "flow.keep_data.rom_prc_warn": "[!] Waarschuwing: Het apparaat draait op de China ROM (PRC). Probeer optie 1 in het hoofdmenu!"
 }

@@ -156,5 +156,8 @@
   "breadcrumb.main": "मुख्य",
   "breadcrumb.settings": "सेटिंग्स",
   "console.quickedit_warn": "QuickEdit मोड सक्षम है। यदि आप माउस से टेक्स्ट चुनते हैं, तो प्रोग्राम फ्रीज़ हुआ लग सकता है। 콘솔 속성에서 QuickEdit을 꺼주세요.",
-  "update.avail_warning": "[!] Warning: This is an outdated version. Please update to the latest version!"
+  "update.avail_warning": "[!] Warning: This is an outdated version. Please update to the latest version!",
+  "flow.keep_data.rom_type": "[*] डिवाइस पर इंस्टॉल ROM प्रकार: {region}",
+  "flow.keep_data.rom_row_ok": "[*] डिवाइस का मान Global ROM (ROW) है, अगले चरण पर बढ़ रहा हूँ।",
+  "flow.keep_data.rom_prc_warn": "[!] चेतावनी: डिवाइस का मान China ROM (PRC) है। कृपया मेन मेन्यू में विकल्प 1 आज़माएँ!"
 }

@@ -20,7 +20,6 @@
   "app.language_ru": "Russian (Русский)",
   "app.language_invalid": "올바른 숫자를 입력해주세요.",
   "app.language_prompt": "Enter your choice (1-12): ",
-  "app.language_ru": "Russian (Русский)",
   "app.menu.back_to_menu": "메인 메뉴로 돌아가려면 ENTER 키를 누르세요.",
   "app.menu.exit": "종료",
   "app.menu.invalid_choice": "올바른 값을 입력해주세요.",
@@ -157,5 +156,8 @@
   "breadcrumb.main": "메인",
   "breadcrumb.settings": "설정",
   "console.quickedit_warn": "QuickEdit 모드가 켜져 있습니다. 마우스로 텍스트를 선택하면 프로그램이 멈춘 것처럼 보일 수 있습니다. 콘솔 속성에서 QuickEdit을 꺼주세요.",
-  "update.avail_warning": "[!] 경고: 현재 파일은 구버전입니다. 최신 버전 파일로 업데이트해 주세요!"
+  "update.avail_warning": "[!] 경고: 현재 파일은 구버전입니다. 최신 버전 파일로 업데이트해 주세요!",
+  "flow.keep_data.rom_type": "[*] 기기에 설치된 롬 유형: {region}",
+  "flow.keep_data.rom_row_ok": "[*] 기기의 값이 글로벌롬(ROW)이므로 다음 단계로 진행하겠습니다.",
+  "flow.keep_data.rom_prc_warn": "[!] 경고: 기기의 값이 중국 내수롬(PRC)입니다, 메인 메뉴 1번으로 시도해주세요!"
 }

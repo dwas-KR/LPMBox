@@ -9,7 +9,7 @@ from .global_flow import _ask_country_change_plan, _check_flash_xml_platform, _c
 from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
 from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs
-from .utils import clear_console, log, wait_for_device
+from .utils import clear_console, log, wait_for_device, adb_shell_getprop
  
 def _confirm_keep_data() -> bool:
     log('flow.keep_data.confirm')
@@ -82,6 +82,14 @@ def run_firmware_upgrade_keep_data_flow() -> None:
     log('flow.keep_data.start')
     log('app.menu.separator')
     if not wait_for_device():
+        return
+    region = (adb_shell_getprop('ro.config.zui.region') or '').strip()
+    region_upper = region.upper()
+    log('flow.keep_data.rom_type', region=region_upper if region_upper else region)
+    if region_upper == 'ROW':
+        log('flow.keep_data.rom_row_ok')
+    elif region_upper == 'PRC':
+        log('flow.keep_data.rom_prc_warn')
         return
     time.sleep(3)
     log('flow.device_info_check')

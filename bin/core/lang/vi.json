@@ -156,5 +156,8 @@
   "breadcrumb.main": "Chính",
   "breadcrumb.settings": "Cài đặt",
   "console.quickedit_warn": "QuickEdit đang bật. Nếu bạn chọn văn bản bằng chuột, chương trình có thể trông như bị treo. Hãy tắt QuickEdit trong thuộc tính console.",
-  "update.avail_warning": "[!] Cảnh báo: Đây là phiên bản cũ. Vui lòng cập nhật lên phiên bản mới nhất!"
+  "update.avail_warning": "[!] Cảnh báo: Đây là phiên bản cũ. Vui lòng cập nhật lên phiên bản mới nhất!",
+  "flow.keep_data.rom_type": "[*] Loại ROM đang cài trên thiết bị: {region}",
+  "flow.keep_data.rom_row_ok": "[*] Thiết bị đang ở Global ROM (ROW), sẽ chuyển sang bước tiếp theo.",
+  "flow.keep_data.rom_prc_warn": "[!] Cảnh báo: Thiết bị đang ở ROM nội địa Trung Quốc (PRC). Hãy thử mục 1 trong menu chính!"
 }

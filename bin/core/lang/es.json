@@ -156,5 +156,8 @@
   "breadcrumb.main": "Principal",
   "breadcrumb.settings": "Ajustes",
   "console.quickedit_warn": "El modo QuickEdit está habilitado. Si seleccionas texto con el ratón, el programa puede parecer bloqueado. Desactiva QuickEdit en las propiedades de la consola.",
-  "update.avail_warning": "[!] Warning: This is an outdated version. Please update to the latest version!"
+  "update.avail_warning": "[!] Warning: This is an outdated version. Please update to the latest version!",
+  "flow.keep_data.rom_type": "[*] Tipo de ROM instalada en el dispositivo: {region}",
+  "flow.keep_data.rom_row_ok": "[*] El dispositivo está en la ROM global (ROW). Continuaré al siguiente paso.",
+  "flow.keep_data.rom_prc_warn": "[!] Advertencia: El dispositivo está en la ROM china (PRC). ¡Prueba la opción 1 del menú principal!"
 }

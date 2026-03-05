@@ -156,5 +156,8 @@
   "breadcrumb.main": "主選單",
   "breadcrumb.settings": "設定",
   "console.quickedit_warn": "QuickEdit 模式已啟用。若用滑鼠選取文字，程式可能看起來像是卡住。請在主控台屬性中關閉 QuickEdit。",
-  "update.avail_warning": "[!] 警告：這是舊版檔案。請更新到最新版本！"
+  "update.avail_warning": "[!] 警告：這是舊版檔案。請更新到最新版本！",
+  "flow.keep_data.rom_type": "[*] 裝置已安裝的 ROM 類型：{region}",
+  "flow.keep_data.rom_row_ok": "[*] 裝置為全球 ROM（ROW），將繼續下一步。",
+  "flow.keep_data.rom_prc_warn": "[!] 警告：裝置為中國內地 ROM（PRC），請回到主選單嘗試第 1 項！"
 }

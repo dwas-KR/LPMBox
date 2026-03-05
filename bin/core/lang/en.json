@@ -156,5 +156,8 @@
   "breadcrumb.main": "Main",
   "breadcrumb.settings": "Settings",
   "console.quickedit_warn": "QuickEdit mode is enabled. If you select text with the mouse, the program may appear to freeze. Disable QuickEdit in the console properties.",
-  "update.avail_warning": "[!] Warning: This is an outdated version. Please update to the latest version!"
+  "update.avail_warning": "[!] Warning: This is an outdated version. Please update to the latest version!",
+  "flow.keep_data.rom_type": "[*] Installed ROM type on device: {region}",
+  "flow.keep_data.rom_row_ok": "[*] The device is on Global ROM (ROW), proceeding to the next step.",
+  "flow.keep_data.rom_prc_warn": "[!] Warning: The device is on China ROM (PRC). Please try option 1 in the main menu!"
 }
