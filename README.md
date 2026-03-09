@@ -47,30 +47,39 @@
 
 ![Image](https://github.com/user-attachments/assets/b0ad0ba3-597a-4949-8409-522407eb9eb8)
 
-### 3.1 Option 1: Switch PRC (CN) ↔ ROW (Global) Firmware [Data Wipe]
-Performs a clean install (factory reset). **All data will be erased.**  
-Use this option to freely switch between **PRC (CN)** and **ROW (Global)** firmware.
+### 3.1 Option 1: Install/Flash PRC (CN) ↔ ROW (Global) Firmware [Data Wipe]
+Performs a clean installation (factory reset). **All user data will be erased.** 
 
 ### 3.2 Option 2: Update ROW (Global) Firmware [Keep Data]
-Updates **ROW (Global)** firmware while keeping your user data as much as possible.
+Use this option to freely switch between **ROW (Global)** firmware.
 
 ### 3.3 Option 3: Disable OTA
 Disables system OTA update checks, notifications, and related components.
 
-### 3.4 Option 4: MediaTek Driver Download
+### 3.4 Option 4: Enable OTA [China ROM Only]
+Restores the system update app and OTA functionality on **PRC (China) ROM** devices.  
+If the device is running **ROW firmware**, a warning will be displayed and the program will return to the main menu.
+
+### 3.5 Option 5: Download MediaTek Driver
 Opens the MediaTek driver download page and shows the current driver status  
 (e.g., **Installed / Not installed**).
 
-### 3.5 Option 5: Check for LPMBox Updates
-Checks for the LPMBox version and updates the tool if an update is available.
+### 3.6 Option 6: Country Code Change Feature [ON/OFF]
+Toggles the **Country Code Change** feature.
 
-### 3.6 Option 6: Change LPMBox Language
-Lets you reselect your preferred UI language at any time.
+- When **OFF**, Menu 1 and Menu 2 will skip the country code prompt and display:
+  `[*] Skipping country code feature.`
 
-### 3.7 Option 7: Developer YouTube
-Introduces guides and other useful Lenovo tablet tools (ZUI / ZUXOS).
+### 3.7 Option 7: Check for LPMBox Updates
+Checks the current LPMBox version and updates the tool if a newer version is available.
 
-### 3.8 Exit
+### 3.8 Option 8: Change LPMBox Language
+Allows you to reselect your preferred UI language at any time.
+
+### 3.9 Option 9: Developer YouTube
+Opens the developer's YouTube channel with guides and tools related to Lenovo tablets (ZUI / ZUXOS).
+
+### 3.10 Exit
 Press `x` to exit the program.
 
 ---
