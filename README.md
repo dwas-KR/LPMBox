@@ -45,7 +45,7 @@
 
 ## 3. Menu (Functions)
 
-![Image](https://github.com/user-attachments/assets/b0ad0ba3-597a-4949-8409-522407eb9eb8)
+![Image](https://github.com/user-attachments/assets/ad800f39-f909-484d-a107-4f4c7e3f2dc3)
 
 ### 3.1 Option 1: Install/Flash PRC (CN) ↔ ROW (Global) Firmware [Data Wipe]
 Performs a clean installation (factory reset). **All user data will be erased.** 
