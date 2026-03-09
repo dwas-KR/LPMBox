@@ -110,7 +110,7 @@ def _load_saved_language() -> str | None:
                 return 'zh_cn'
             if c == 'en_au':
                 return 'en'
-            if c in ('ko', 'en', 'ru', 'jp', 'el', 'zh_cn', 'vi', 'ka', 'nl'):
+            if c in ('ko', 'en', 'ru', 'jp', 'el', 'zh_cn', 'vi', 'ka', 'nl', 'hi', 'ar', 'es'):
                 return c
     except Exception:
         pass
@@ -272,23 +272,32 @@ def _main_menu() -> None:
     from .global_flow import run_global_firmware_upgrade_flow
     from .fw_upgrade_flow import run_firmware_upgrade_keep_data_flow
     from .ota_disable_flow import run_ota_disable_flow
+    from .ota_enable_flow import run_ota_enable_flow
     from .mtk_driver import is_mtk_driver_installed, open_mtk_driver_site
     while True:
+        data = _load_settings()
+        country_feature = data.get('country_code_feature')
+        if not isinstance(country_feature, bool):
+            country_feature = True
         driver_installed = is_mtk_driver_installed()
         status_key = 'app.mtk_driver.status_installed' if driver_installed else 'app.mtk_driver.status_needed'
         status = get_string(status_key)
+        country_status_key = 'app.toggle.on' if country_feature else 'app.toggle.off'
+        country_status = get_string(country_status_key)
         menu = TerminalMenu(get_string('app.title'), breadcrumbs=get_string('breadcrumb.main'))
         menu.add_label(get_string('app.menu.section_install'))
         menu.add_option('1', get_string('app.menu.option1'))
         menu.add_option('2', get_string('app.menu.option2'))
         menu.add_option('3', get_string('app.menu.option3'))
+        menu.add_option('4', get_string('app.menu.option4'))
         menu.add_separator()
         menu.add_label(get_string('app.menu.section_other'))
-        menu.add_option('4', f"{get_string('app.menu.option4')} {status}")
-        menu.add_option('5', get_string('app.menu.option5'))
-        menu.add_option('6', get_string('app.menu.option6'))
-        menu.add_separator()
+        menu.add_option('5', f"{get_string('app.menu.option5')} {status}")
+        menu.add_option('6', f"{get_string('app.menu.option6')} {country_status}")
         menu.add_option('7', get_string('app.menu.option7'))
+        menu.add_option('8', get_string('app.menu.option8'))
+        menu.add_separator()
+        menu.add_option('9', get_string('app.menu.option9'))
         menu.add_option('x', get_string('app.menu.exit'))
         try:
             choice = menu.ask(prompt=get_string('app.menu.prompt'), default_key='1')
@@ -322,16 +331,26 @@ def _main_menu() -> None:
                 log('app.user_cancel')
             _pause_back_to_menu()
         elif choice == '4':
-            open_mtk_driver_site()
+            clear_console()
+            try:
+                run_ota_enable_flow()
+            except KeyboardInterrupt:
+                log('app.user_cancel')
+            _pause_back_to_menu()
         elif choice == '5':
+            open_mtk_driver_site()
+        elif choice == '6':
+            data['country_code_feature'] = not country_feature
+            _save_settings(data)
+        elif choice == '7':
             clear_console()
             print(get_string('app.title'))
             _check_for_updates(interactive=True)
             _pause_back_to_menu()
-        elif choice == '6':
+        elif choice == '8':
             clear_console()
             _choose_language(force_prompt=True)
-        elif choice == '7':
+        elif choice == '9':
             try:
                 os.startfile('http://www.youtube.com/@dwas_KR?sub_confirmation=1')
             except OSError:

@@ -4,6 +4,7 @@ import time
 import subprocess
 import shutil
 import re
+import json
 from datetime import datetime
 from xml.etree import ElementTree as ET
 from .adb_utils import adb_reboot, adb_shell_getprop, kill_adb_server
@@ -16,6 +17,34 @@ from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
 from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs
 from .utils import clear_console, log, wait_for_device, _write_log_line, run_adb, run_cmd
+
+_SETTINGS_PATH = Path(__file__).resolve().parent / 'lang' / 'settings.json'
+
+def _load_settings() -> dict:
+    try:
+        if _SETTINGS_PATH.is_file():
+            data = json.loads(_SETTINGS_PATH.read_text(encoding='utf-8', errors='ignore'))
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+def _country_code_feature_enabled() -> bool:
+    data = _load_settings()
+    v = data.get('country_code_feature')
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int):
+        return bool(v)
+    if isinstance(v, str):
+        t = v.strip().lower()
+        if t in ('1','true','yes','y','on'):
+            return True
+        if t in ('0','false','no','n','off'):
+            return False
+    return True
+
  
 def _cleanup_before_flow() -> None:
     for path in IMAGE_DIR.glob('*_Android_scatter.xml'):
@@ -106,6 +135,24 @@ def _detect_platform() -> str | None:
                 v_num = None
     if v_num is not None and v_num <= 14:
         log('flow.android_version_detected', version=version)
+    region = adb_shell_getprop('ro.config.zui.region').strip()
+    region_upper = region.upper()
+    log('flow.keep_data.rom_type', region=region_upper if region_upper else region)
+    if region_upper == 'ROW':
+        log('flow.prc.rom_row_warn')
+        kill_adb_server()
+        return None
+    if region_upper == 'PRC':
+        log('flow.prc.rom_prc_ok')
+    if v_num is not None and v_num <= 14:
+        if v_num == 14 and region_upper == 'PRC':
+            log('ota.restore_start')
+            try:
+                from .ota_enable_flow import _restore_ota_packages
+                _restore_ota_packages()
+            except Exception:
+                pass
+            log('ota.update_hint')
         log('flow.android_version_low')
         kill_adb_server()
         return None
@@ -356,7 +403,12 @@ def run_global_firmware_upgrade_flow() -> None:
     if not _prepare_prc_lkdtbo_files():
         return
     time.sleep(3)
-    change_plan = _ask_country_change_plan()
+    country_feature = _country_code_feature_enabled()
+    if country_feature:
+        change_plan = _ask_country_change_plan()
+    else:
+        log('country.feature_skip')
+        change_plan = False
     time.sleep(3)
     log('flow.scatter_prepare')
     scatter_path = prepare_platform_scatter(platform, keep_user_data=False)
@@ -372,7 +424,8 @@ def run_global_firmware_upgrade_flow() -> None:
         launch_spft_gui()
         wait_and_patch_proinfo(platform)
     else:
-        log('country.no_change')
+        if country_feature:
+            log('country.no_change')
     if not wait_for_device():
         return
     try:

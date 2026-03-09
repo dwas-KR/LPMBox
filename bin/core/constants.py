@@ -24,7 +24,7 @@ PYTHON_EMBED_URL_TEMPLATE = 'https://www.python.org/ftp/python/{version}/python-
 PYTHON_PTH_FILENAME = 'python314._pth'
 GET_PIP_URL = 'https://bootstrap.pypa.io/get-pip.py'
 REQUIRED_PYTHON_PACKAGES = ['cryptography']
-APP_VERSION = '1.6.3'
+APP_VERSION = '1.7.0'
 
 LKDTBO_DIR = TOOLS_DIR / 'lk, dtbo'
 LKDTBO_GITHUB_COMMIT = '508263f922357b3705d8590fc258b5ac35d07957'

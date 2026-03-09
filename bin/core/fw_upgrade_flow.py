@@ -1,15 +1,17 @@
 from __future__ import annotations
 from pathlib import Path
 import time
+import re
 from xml.etree import ElementTree as ET
 from .adb_utils import adb_reboot, kill_adb_server
-from .constants import IMAGE_DIR, TOOLS_DIR, READBACK_DIR
+from . import adb_utils as adb_state
+from .constants import IMAGE_DIR, TOOLS_DIR, READBACK_DIR, PLATFORM_TOOLS_DIR
 from .flash_spft import launch_spft_gui, run_firmware_upgrade
-from .global_flow import _ask_country_change_plan, _check_flash_xml_platform, _cleanup_after_flow, _cleanup_before_flow, _detect_platform, _log_device_extra_info, _prepare_prc_lkdtbo_files
+from .global_flow import _ask_country_change_plan, _check_flash_xml_platform, _cleanup_after_flow, _cleanup_before_flow, _log_device_extra_info, _prepare_prc_lkdtbo_files, _country_code_feature_enabled, wait_for_fastboot, _detect_current_ab_slot, _switch_ab_slot_fastboot
 from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
 from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs
-from .utils import clear_console, log, wait_for_device, adb_shell_getprop
+from .utils import clear_console, log, wait_for_device, adb_shell_getprop, run_adb, run_cmd
  
 def _confirm_keep_data() -> bool:
     log('flow.keep_data.confirm')
@@ -76,6 +78,19 @@ def _patch_userdata_keep_data(scatter_path: Path) -> None:
     log('scatter.userdata_patched')
 
 
+def _detect_platform_keep_data() -> str | None:
+    log('flow.detect_platform')
+    log('flow.android_version_detecting')
+    version = (adb_shell_getprop('ro.build.version.release') or '').strip()
+    adb_state.LAST_ANDROID_VERSION_RELEASE = version
+    platform = (adb_shell_getprop('ro.vendor.mediatek.platform') or '').strip()
+    if not platform or not platform.startswith('MT'):
+        log('flow.not_mtk')
+        return None
+    log('flow.platform', platform=platform)
+    return platform
+
+
 def run_firmware_upgrade_keep_data_flow() -> None:
     clear_console()
     log('app.menu.separator')
@@ -93,7 +108,7 @@ def run_firmware_upgrade_keep_data_flow() -> None:
         return
     time.sleep(3)
     log('flow.device_info_check')
-    platform = _detect_platform()
+    platform = _detect_platform_keep_data()
     if platform is None:
         return
     _log_device_extra_info()
@@ -105,7 +120,12 @@ def run_firmware_upgrade_keep_data_flow() -> None:
     if not _prepare_prc_lkdtbo_files():
         return
     time.sleep(3)
-    change_plan = _ask_country_change_plan()
+    country_feature = _country_code_feature_enabled()
+    if country_feature:
+        change_plan = _ask_country_change_plan()
+    else:
+        log('country.feature_skip')
+        change_plan = False
     time.sleep(3)
     log('flow.scatter_prepare')
     scatter_path = prepare_platform_scatter(platform, keep_user_data=True)
@@ -122,12 +142,31 @@ def run_firmware_upgrade_keep_data_flow() -> None:
         launch_spft_gui()
         wait_and_patch_proinfo(platform)
     else:
-        log('country.no_change')
+        if country_feature:
+            log('country.no_change')
     if not wait_for_device():
         return
+    try:
+        run_adb(['reboot', 'bootloader'], capture_output=True)
+    except Exception:
+        pass
+    log('flow.fastboot.detect')
+    if not wait_for_fastboot():
+        log('flow.fastboot_not_detected')
+        kill_adb_server()
+        return
+    current_slot = _detect_current_ab_slot()
+    if current_slot:
+        _switch_ab_slot_fastboot(current_slot)
     log('flow.reboot_now')
     backup_platform_scatter_to_logs(platform)
-    adb_reboot()
+    try:
+        run_cmd([str(PLATFORM_TOOLS_DIR / 'fastboot'), 'reboot'])
+    except Exception:
+        try:
+            run_cmd(['fastboot', 'reboot'])
+        except Exception:
+            pass
     log('preloader.waiting')
     log('preloader.detected')
     run_firmware_upgrade()
