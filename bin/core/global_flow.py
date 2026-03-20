@@ -15,6 +15,7 @@ from .flash_spft import launch_spft_gui, run_firmware_upgrade
 from .i18n import get_string
 from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
+from .firmware_guard import validate_firmware_image
 from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs
 from .utils import clear_console, log, wait_for_device, _write_log_line, run_adb, run_cmd
 
@@ -396,6 +397,9 @@ def run_global_firmware_upgrade_flow() -> None:
         return
     _log_device_extra_info()
     _cleanup_before_flow()
+    time.sleep(3)
+    if not validate_firmware_image():
+        return
     time.sleep(3)
     if not _check_flash_xml_platform(platform):
         return

@@ -3,6 +3,7 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 MTK_ROOT = BASE_DIR
 BIN_DIR = BASE_DIR / 'bin'
 CORE_DIR = BIN_DIR / 'core'
+BLOCK_FIRMWARE_INI = CORE_DIR / 'block_firmware.ini'
 TOOLS_DIR = BASE_DIR / 'tools'
 IMAGE_DIR = BASE_DIR / 'image'
 PYTHON_DIR = BIN_DIR / 'python'
@@ -24,7 +25,7 @@ PYTHON_EMBED_URL_TEMPLATE = 'https://www.python.org/ftp/python/{version}/python-
 PYTHON_PTH_FILENAME = 'python314._pth'
 GET_PIP_URL = 'https://bootstrap.pypa.io/get-pip.py'
 REQUIRED_PYTHON_PACKAGES = ['cryptography']
-APP_VERSION = '1.7.0'
+APP_VERSION = '1.8.0'
 
 LKDTBO_DIR = TOOLS_DIR / 'lk, dtbo'
 LKDTBO_GITHUB_COMMIT = '508263f922357b3705d8590fc258b5ac35d07957'
@@ -35,4 +36,12 @@ LKDTBO_MODEL_TO_ZIP = {
     'TB361FU': 'TB365FC.zip',
     'TB335FC': 'TB335FC.zip',
     'TB336FU': 'TB335FC.zip',
+}
+
+LKDTBO_ZIP_URLS = {
+    'TB375FC.zip': [
+        'https://raw.githubusercontent.com/dwas-KR/LPMBox/refs/heads/Downloads/TB375FC.zip',
+        'https://drive.usercontent.google.com/download?id=1ZNqjopDFoFB8c1ekirYKv75H5aLPvMo9&export=download&authuser=0',
+        'https://fs.mybox.naver.com/file/download.api?svcType=MYBOX-WEB&resourceKey=Ynllb2xwdW5nMzYxfDM0NzI1OTU3NzM3OTg5NzY4NDh8Rnww&time=1774029777854',
+    ],
 }

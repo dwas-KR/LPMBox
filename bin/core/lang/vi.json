@@ -174,5 +174,15 @@
   "app.toggle.on": "[ON]",
   "app.toggle.off": "[OFF]",
   "app.menu.option8": "Đổi ngôn ngữ",
-  "app.menu.option9": "YouTube nhà phát triển"
+  "app.menu.option9": "YouTube nhà phát triển",
+  "flow.firmware_version_detecting": "[*] Đang phát hiện phiên bản firmware trong thư mục image..",
+  "flow.firmware_version_file_missing": "[!] Thiếu tệp dùng để phát hiện phiên bản firmware. Hãy xóa thư mục image trong LPMBOX rồi chép lại.",
+  "flow.block_firmware_missing": "[!] Thiếu tệp block_firmware.ini. Vui lòng kiểm tra các tệp của LPMBOX.",
+  "flow.firmware_version_not_found": "[!] Không thể phát hiện phiên bản firmware từ vendor_boot-debug.img.",
+  "flow.firmware_version_ok": "[+] Đã phát hiện đúng phiên bản firmware.",
+  "flow.firmware_version_blocked": "[!] Phiên bản firmware này có lỗi và vấn đề đã biết! Hãy dùng tệp trong bình luận ghim của video hướng dẫn LPMBOX.",
+  "app.menu.dev_msg1": "Xin chào! Tôi là nhà phát triển.",
+  "app.menu.dev_msg2": "Tôi để lại lời nhắn này vì vẫn còn người dùng gặp khó khăn khi cài ROM bằng phương pháp SPFlashToolV6 đã được biết đến trước đây.",
+  "app.menu.dev_msg3": "Nếu bạn dùng thử LPMBox và thấy hài lòng, tôi sẽ rất cảm kích nếu bạn có thể giúp giới thiệu chương trình này.",
+  "app.menu.dev_msg4": "Luôn cảm ơn bạn đã quan tâm. Chúc bạn một ngày thật tốt lành :)"
 }

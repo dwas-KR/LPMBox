@@ -174,5 +174,15 @@
   "app.toggle.on": "[ON]",
   "app.toggle.off": "[OFF]",
   "app.menu.option8": "Αλλαγή γλώσσας",
-  "app.menu.option9": "YouTube προγραμματιστή"
+  "app.menu.option9": "YouTube προγραμματιστή",
+  "flow.firmware_version_detecting": "[*] Εντοπισμός της έκδοσης firmware στον φάκελο image..",
+  "flow.firmware_version_file_missing": "[!] Λείπει το αρχείο που απαιτείται για τον έλεγχο της έκδοσης του firmware. Διαγράψτε τον φάκελο image στο LPMBOX και αντιγράψτε τον ξανά.",
+  "flow.block_firmware_missing": "[!] Το αρχείο block_firmware.ini λείπει. Ελέγξτε τα αρχεία του LPMBOX.",
+  "flow.firmware_version_not_found": "[!] Αποτυχία εντοπισμού της έκδοσης firmware από το vendor_boot-debug.img.",
+  "flow.firmware_version_ok": "[+] Εντοπίστηκε σωστή έκδοση firmware.",
+  "flow.firmware_version_blocked": "[!] Αυτή η έκδοση firmware έχει σφάλματα και γνωστά προβλήματα! Χρησιμοποιήστε το αρχείο που υπάρχει στο καρφιτσωμένο σχόλιο του βίντεο οδηγού LPMBOX.",
+  "app.menu.dev_msg1": "Γεια σας! Είμαι ο προγραμματιστής.",
+  "app.menu.dev_msg2": "Αφήνω αυτό το μήνυμα επειδή υπάρχουν ακόμη χρήστες που δυσκολεύονται να εγκαταστήσουν τη ROM με τη μέχρι τώρα γνωστή μέθοδο SPFlashToolV6.",
+  "app.menu.dev_msg3": "Αν δοκιμάσετε το LPMBox και σας αρέσει, θα το εκτιμούσα πολύ αν βοηθούσατε να το γνωρίσουν περισσότεροι χρήστες.",
+  "app.menu.dev_msg4": "Σας ευχαριστώ πάντα για το ενδιαφέρον σας. Να έχετε μια υπέροχη μέρα :)"
 }

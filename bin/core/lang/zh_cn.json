@@ -174,5 +174,15 @@
   "app.toggle.on": "[ON]",
   "app.toggle.off": "[OFF]",
   "app.menu.option8": "更改语言",
-  "app.menu.option9": "开发者 YouTube"
+  "app.menu.option9": "开发者 YouTube",
+  "flow.firmware_version_detecting": "[*] 正在偵測 image 資料夾中的韌體版本..",
+  "flow.firmware_version_file_missing": "[!] 缺少用於偵測韌體版本的檔案。請刪除 LPMBOX 中的 image 資料夾後重新複製。",
+  "flow.block_firmware_missing": "[!] 缺少 block_firmware.ini 檔案。請檢查 LPMBOX 檔案。",
+  "flow.firmware_version_not_found": "[!] 無法從 vendor_boot-debug.img 偵測到韌體版本。",
+  "flow.firmware_version_ok": "[+] 已偵測到正確的韌體版本。",
+  "flow.firmware_version_blocked": "[!] 此韌體版本存在 Bug 與已知問題！請使用 LPMBOX 教學影片置頂留言中的檔案。",
+  "app.menu.dev_msg1": "您好！我是开发者。",
+  "app.menu.dev_msg2": "留下这段话，是因为仍有一些用户在使用之前常见的 SPFlashToolV6 方法安装 ROM 时遇到困难。",
+  "app.menu.dev_msg3": "如果您试用了 LPMBox 并且觉得不错，恳请您帮忙宣传一下这个程序。",
+  "app.menu.dev_msg4": "非常感谢您一直以来的关注，祝您今天愉快 :)"
 }

@@ -173,5 +173,15 @@
   "app.toggle.on": "[ON]",
   "app.toggle.off": "[OFF]",
   "app.menu.option8": "LPMBox 言語変更",
-  "app.menu.option9": "開発者 YouTube"
+  "app.menu.option9": "開発者 YouTube",
+  "flow.firmware_version_detecting": "[*] imageフォルダー内のファームウェアバージョンを検出しています..",
+  "flow.firmware_version_file_missing": "[!] ファームウェアのバージョンを確認するためのファイルがありません。LPMBOXのimageフォルダーを削除して、もう一度コピーしてください。",
+  "flow.block_firmware_missing": "[!] block_firmware.ini ファイルが見つかりません。LPMBOXのファイルを確認してください。",
+  "flow.firmware_version_not_found": "[!] vendor_boot-debug.img からファームウェアのバージョンを検出できませんでした。",
+  "flow.firmware_version_ok": "[+] 正しいファームウェアバージョンを検出しました。",
+  "flow.firmware_version_blocked": "[!] このファームウェアバージョンにはバグや問題があります。LPMBOXガイド動画の固定コメントにあるファイルでお試しください。",
+  "app.menu.dev_msg1": "こんにちは。開発者です。",
+  "app.menu.dev_msg2": "従来知られている SPFlashToolV6 の方法で ROM のインストールに苦労される方がまだいらっしゃるため、このメッセージを残します。",
+  "app.menu.dev_msg3": "LPMBox を使ってみて気に入っていただけたら、ぜひプログラムの紹介にご協力ください。",
+  "app.menu.dev_msg4": "いつも関心を寄せていただきありがとうございます。良い一日をお過ごしください :)"
 }

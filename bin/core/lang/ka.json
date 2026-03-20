@@ -174,5 +174,15 @@
   "app.toggle.on": "[ON]",
   "app.toggle.off": "[OFF]",
   "app.menu.option8": "ენის შეცვლა",
-  "app.menu.option9": "დეველოპერის YouTube"
+  "app.menu.option9": "დეველოპერის YouTube",
+  "flow.firmware_version_detecting": "[*] image საქაღალდეში firmware-ის ვერსიის აღმოჩენა მიმდინარეობს..",
+  "flow.firmware_version_file_missing": "[!] firmware-ის ვერსიის დასადგენად საჭირო ფაილი აკლია. წაშალეთ LPMBOX-ის image საქაღალდე და თავიდან დააკოპირეთ.",
+  "flow.block_firmware_missing": "[!] block_firmware.ini ფაილი აკლია. შეამოწმეთ LPMBOX-ის ფაილები.",
+  "flow.firmware_version_not_found": "[!] vendor_boot-debug.img-დან firmware-ის ვერსიის ამოცნობა ვერ მოხერხდა.",
+  "flow.firmware_version_ok": "[+] აღმოჩენილია სწორი firmware-ის ვერსია.",
+  "flow.firmware_version_blocked": "[!] firmware-ის ამ ვერსიას აქვს ბაგები და ცნობილი პრობლემები! გამოიყენეთ LPMBOX-ის გზამკვლევი ვიდეოს დამაგრებულ კომენტარში მოცემული ფაილი.",
+  "app.menu.dev_msg1": "გამარჯობა! მე ვარ პროგრამის შემქმნელი.",
+  "app.menu.dev_msg2": "ამ შეტყობინებას ვტოვებ, რადგან ზოგიერთ მომხმარებელს ჯერ კიდევ უჭირს ROM-ის დაყენება ადრე ცნობილი SPFlashToolV6 მეთოდით.",
+  "app.menu.dev_msg3": "თუ LPMBox-ს გამოსცდით და მოგეწონებათ, ძალიან მადლობელი ვიქნები, თუ პროგრამის გავრცელებაში დაგვეხმარებით.",
+  "app.menu.dev_msg4": "დიდი მადლობა თქვენი ინტერესისთვის. სასიამოვნო დღეს გისურვებთ :)"
 }

@@ -174,5 +174,15 @@
   "app.toggle.on": "[ON]",
   "app.toggle.off": "[OFF]",
   "app.menu.option8": "Сменить язык",
-  "app.menu.option9": "YouTube разработчика"
+  "app.menu.option9": "YouTube разработчика",
+  "flow.firmware_version_detecting": "[*] Определяем версию прошивки в папке image..",
+  "flow.firmware_version_file_missing": "[!] Файл для определения версии прошивки отсутствует. Удалите папку image в LPMBOX и скопируйте её заново.",
+  "flow.block_firmware_missing": "[!] Файл block_firmware.ini отсутствует. Проверьте файлы LPMBOX.",
+  "flow.firmware_version_not_found": "[!] Не удалось определить версию прошивки из vendor_boot-debug.img.",
+  "flow.firmware_version_ok": "[+] Обнаружена корректная версия прошивки.",
+  "flow.firmware_version_blocked": "[!] У этой версии прошивки есть баги и известные проблемы! Используйте файл из закреплённого комментария к видео-гайду LPMBOX.",
+  "app.menu.dev_msg1": "Здравствуйте! Я разработчик.",
+  "app.menu.dev_msg2": "Оставляю это сообщение, потому что у некоторых пользователей до сих пор возникают трудности с установкой ROM старым способом через SPFlashToolV6.",
+  "app.menu.dev_msg3": "Если вы попробуете LPMBox и программа вам понравится, буду очень благодарен, если вы поможете рассказать о ней другим.",
+  "app.menu.dev_msg4": "Спасибо вам за интерес и поддержку. Желаю вам отличного дня :)"
 }

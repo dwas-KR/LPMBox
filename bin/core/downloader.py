@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from .constants import TOOLS_DIR, TOOLS_DOWNLOAD_DIR, PLATFORM_TOOLS_DIR, PLATFORM_TOOLS_URLS, SPFT_ZIP_URLS, PYTHON_DIR, PYTHON_VERSION, PYTHON_EMBED_URL_TEMPLATE, PYTHON_PTH_FILENAME, GET_PIP_URL, REQUIRED_PYTHON_PACKAGES, SPFT_EXE, LKDTBO_DIR, LKDTBO_MODEL_TO_ZIP, LKDTBO_GITHUB_COMMIT
+from .constants import TOOLS_DIR, TOOLS_DOWNLOAD_DIR, PLATFORM_TOOLS_DIR, PLATFORM_TOOLS_URLS, SPFT_ZIP_URLS, PYTHON_DIR, PYTHON_VERSION, PYTHON_EMBED_URL_TEMPLATE, PYTHON_PTH_FILENAME, GET_PIP_URL, REQUIRED_PYTHON_PACKAGES, SPFT_EXE, LKDTBO_DIR, LKDTBO_MODEL_TO_ZIP, LKDTBO_GITHUB_COMMIT, LKDTBO_ZIP_URLS
 from .utils import log, get_term_width
  
 def _download_file(url: str, dest: Path) -> None:
@@ -264,10 +264,13 @@ def ensure_lkdtbo_zip_for_model(model: str) -> Path | None:
     dest = TOOLS_DOWNLOAD_DIR / name
     if dest.is_file():
         return dest
-    raw_url = f'https://raw.githubusercontent.com/dwas-KR/LPMBox/{LKDTBO_GITHUB_COMMIT}/{name}'
-    alt_url = f'https://github.com/dwas-KR/LPMBox/raw/{LKDTBO_GITHUB_COMMIT}/{name}'
+    urls = list(LKDTBO_ZIP_URLS.get(name, []))
+    urls.extend([
+        f'https://raw.githubusercontent.com/dwas-KR/LPMBox/{LKDTBO_GITHUB_COMMIT}/{name}',
+        f'https://github.com/dwas-KR/LPMBox/raw/{LKDTBO_GITHUB_COMMIT}/{name}',
+    ])
     try:
-        _download_from_list([raw_url, alt_url], dest)
+        _download_from_list(urls, dest)
     except Exception:
         return None
     return dest

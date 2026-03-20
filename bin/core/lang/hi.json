@@ -174,5 +174,15 @@
   "app.toggle.on": "[ON]",
   "app.toggle.off": "[OFF]",
   "app.menu.option8": "भाषा बदलें",
-  "app.menu.option9": "डेवलपर YouTube"
+  "app.menu.option9": "डेवलपर YouTube",
+  "flow.firmware_version_detecting": "[*] image फ़ोल्डर में फ़र्मवेयर संस्करण का पता लगाया जा रहा है..",
+  "flow.firmware_version_file_missing": "[!] फ़र्मवेयर संस्करण पहचानने के लिए आवश्यक फ़ाइल मौजूद नहीं है। LPMBOX में image फ़ोल्डर हटाकर फिर से कॉपी करें।",
+  "flow.block_firmware_missing": "[!] block_firmware.ini फ़ाइल मौजूद नहीं है। कृपया LPMBOX फ़ाइलों की जाँच करें।",
+  "flow.firmware_version_not_found": "[!] vendor_boot-debug.img से फ़र्मवेयर संस्करण का पता नहीं चल सका।",
+  "flow.firmware_version_ok": "[+] सही फ़र्मवेयर संस्करण मिल गया है।",
+  "flow.firmware_version_blocked": "[!] इस फ़र्मवेयर संस्करण में बग और ज्ञात समस्याएँ हैं! कृपया LPMBOX गाइड वीडियो की पिन की गई टिप्पणी में दिए गए फ़ाइल का उपयोग करें।",
+  "app.menu.dev_msg1": "नमस्ते! मैं डेवलपर हूँ।",
+  "app.menu.dev_msg2": "मैं यह संदेश इसलिए छोड़ रहा हूँ क्योंकि कुछ उपयोगकर्ताओं को पहले से ज्ञात SPFlashToolV6 तरीके से ROM इंस्टॉल करने में अभी भी कठिनाई होती है।",
+  "app.menu.dev_msg3": "यदि आप LPMBox आज़माएँ और आपको यह पसंद आए, तो कृपया इस प्रोग्राम का प्रचार करने में मदद करें।",
+  "app.menu.dev_msg4": "हमेशा रुचि दिखाने के लिए आपका धन्यवाद। आपका दिन शुभ हो :)"
 }

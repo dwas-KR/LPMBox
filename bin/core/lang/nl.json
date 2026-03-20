@@ -174,5 +174,15 @@
   "app.toggle.on": "[ON]",
   "app.toggle.off": "[OFF]",
   "app.menu.option8": "Taal wijzigen",
-  "app.menu.option9": "YouTube van ontwikkelaar"
+  "app.menu.option9": "YouTube van ontwikkelaar",
+  "flow.firmware_version_detecting": "[*] Firmwareversie in de image-map wordt gedetecteerd..",
+  "flow.firmware_version_file_missing": "[!] Het bestand dat nodig is om de firmwareversie te controleren ontbreekt. Verwijder de image-map in LPMBOX en kopieer deze opnieuw.",
+  "flow.block_firmware_missing": "[!] Het bestand block_firmware.ini ontbreekt. Controleer de LPMBOX-bestanden.",
+  "flow.firmware_version_not_found": "[!] Kon de firmwareversie niet detecteren uit vendor_boot-debug.img.",
+  "flow.firmware_version_ok": "[+] Er is een juiste firmwareversie gedetecteerd.",
+  "flow.firmware_version_blocked": "[!] Deze firmwareversie heeft bugs en bekende problemen! Gebruik het bestand uit de vastgezette reactie van de LPMBOX-handleidingvideo.",
+  "app.menu.dev_msg1": "Hallo! Ik ben de ontwikkelaar.",
+  "app.menu.dev_msg2": "Ik laat dit bericht achter omdat sommige gebruikers nog steeds moeite hebben met het installeren van de ROM via de eerder bekende SPFlashToolV6-methode.",
+  "app.menu.dev_msg3": "Als je LPMBox probeert en het bevalt, zou ik het enorm waarderen als je helpt om het programma bekend te maken.",
+  "app.menu.dev_msg4": "Bedankt voor je voortdurende interesse. Ik wens je een fijne dag toe :)"
 }

@@ -6,6 +6,7 @@ import io
 import json
 import urllib.request
 import shutil
+import unicodedata
 import re
 import hashlib
 try:
@@ -723,6 +724,31 @@ def _repeat_sep(sep_template: str, width: int) -> str:
         width = 20
     return ch * width
 
+def _display_width(s: str) -> int:
+    total = 0
+    for ch in s:
+        if ch in '\r\n':
+            continue
+        if unicodedata.combining(ch):
+            continue
+        total += 2 if unicodedata.east_asian_width(ch) in ('F', 'W') else 1
+    return total
+
+def _fit_display(s: str, max_width: int) -> str:
+    if max_width <= 0:
+        return ''
+    out: list[str] = []
+    used = 0
+    for ch in s:
+        if ch in '\r\n':
+            continue
+        cw = 0 if unicodedata.combining(ch) else (2 if unicodedata.east_asian_width(ch) in ('F', 'W') else 1)
+        if used + cw > max_width:
+            break
+        out.append(ch)
+        used += cw
+    return ''.join(out)
+
 class TerminalMenu:
     def __init__(self, title: str, breadcrumbs: str | None = None):
         self.title = title
@@ -740,6 +766,9 @@ class TerminalMenu:
     def add_separator(self) -> None:
         self.items.append((None, '', False))
 
+    def add_rule(self) -> None:
+        self.items.append((None, '__RULE__', False))
+
     def _selectable_indexes(self) -> list[int]:
         idxs: list[int] = []
         for i, (k, _, sel) in enumerate(self.items):
@@ -749,6 +778,7 @@ class TerminalMenu:
 
     def _build_lines(self, current_index: int | None, prompt: str | None) -> tuple[list[str], dict[int, int], dict[int, tuple[str, str]]]:
         width = get_term_width(145)
+        fit_width = max(20, width - 1)
         sep = _repeat_sep(get_string('app.menu.separator'), width)
         lines: list[str] = []
         row_map: dict[int, int] = {}
@@ -758,30 +788,33 @@ class TerminalMenu:
         display_title = self.title
         if self.breadcrumbs:
             display_title = f'{self.breadcrumbs} > {self.title}'
-        lines.append(f'  {display_title}')
+        lines.append(_fit_display(f'  {display_title}', fit_width))
         lines.append(sep)
         lines.append('')
         for i, (k, text, selectable) in enumerate(self.items):
             if selectable and k is not None:
-                sel_line = f' -> {k}. {text}'
-                unsel_line = f'    {k}. {text}'
+                sel_line = _fit_display(f' -> {k}. {text}', fit_width)
+                unsel_line = _fit_display(f'    {k}. {text}', fit_width)
                 row = len(lines) + 1
                 row_map[i] = row
                 text_map[i] = (sel_line, unsel_line)
                 lines.append(sel_line if current_index == i else unsel_line)
             else:
-                lines.append(f'    {text}' if text else '')
+                if text == '__RULE__':
+                    lines.append(sep)
+                else:
+                    lines.append(_fit_display(f'    {text}', fit_width) if text else '')
         lines.append('')
         lines.append(sep)
         if prompt:
-            lines.append(prompt)
+            lines.append(_fit_display(prompt, fit_width))
             try:
-                lines.append(get_string('prompt.use_arrow_keys'))
+                lines.append(_fit_display(get_string('prompt.use_arrow_keys'), fit_width))
             except Exception:
                 try:
-                    lines.append(get_string('prompt_use_arrow_keys'))
+                    lines.append(_fit_display(get_string('prompt_use_arrow_keys'), fit_width))
                 except Exception:
-                    lines.append('Use arrow keys to navigate, Enter to select.')
+                    lines.append(_fit_display('Use arrow keys to navigate, Enter to select.', fit_width))
         return (lines, row_map, text_map)
 
     def _write_suppressed(self, s: str) -> None:

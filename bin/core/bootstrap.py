@@ -299,6 +299,13 @@ def _main_menu() -> None:
         menu.add_separator()
         menu.add_option('9', get_string('app.menu.option9'))
         menu.add_option('x', get_string('app.menu.exit'))
+        menu.add_separator()
+        menu.add_rule()
+        menu.add_separator()
+        menu.add_label(get_string('app.menu.dev_msg1'))
+        menu.add_label(get_string('app.menu.dev_msg2'))
+        menu.add_label(get_string('app.menu.dev_msg3'))
+        menu.add_label(get_string('app.menu.dev_msg4'))
         try:
             choice = menu.ask(prompt=get_string('app.menu.prompt'), default_key='1')
         except KeyboardInterrupt:

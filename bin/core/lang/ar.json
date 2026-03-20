@@ -174,5 +174,15 @@
   "app.toggle.on": "[ON]",
   "app.toggle.off": "[OFF]",
   "app.menu.option8": "تغيير اللغة",
-  "app.menu.option9": "YouTube للمطور"
+  "app.menu.option9": "YouTube للمطور",
+  "flow.firmware_version_detecting": "[*] جارٍ اكتشاف إصدار البرنامج الثابت داخل مجلد image..",
+  "flow.firmware_version_file_missing": "[!] الملف المطلوب لاكتشاف إصدار البرنامج الثابت مفقود. احذف مجلد image في LPMBOX ثم انسخه مرة أخرى.",
+  "flow.block_firmware_missing": "[!] ملف block_firmware.ini مفقود. يرجى التحقق من ملفات LPMBOX.",
+  "flow.firmware_version_not_found": "[!] تعذر اكتشاف إصدار البرنامج الثابت من vendor_boot-debug.img.",
+  "flow.firmware_version_ok": "[+] تم اكتشاف إصدار برنامج ثابت صحيح.",
+  "flow.firmware_version_blocked": "[!] هذا الإصدار من البرنامج الثابت يحتوي على أخطاء ومشكلات معروفة! يُرجى استخدام الملف الموجود في التعليق المثبت على فيديو دليل LPMBOX.",
+  "app.menu.dev_msg1": "مرحبًا! أنا المطور.",
+  "app.menu.dev_msg2": "أترك هذه الرسالة لأن بعض المستخدمين ما زالوا يواجهون صعوبة في تثبيت الروم بالطريقة المعروفة سابقًا عبر SPFlashToolV6.",
+  "app.menu.dev_msg3": "إذا جرّبت LPMBox وأعجبك، فسأكون ممتنًا جدًا إذا ساعدت في التعريف بالبرنامج.",
+  "app.menu.dev_msg4": "شكرًا دائمًا على اهتمامك، وأتمنى لك يومًا رائعًا :)"
 }

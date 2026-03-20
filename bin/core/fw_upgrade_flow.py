@@ -11,6 +11,7 @@ from .global_flow import _ask_country_change_plan, _check_flash_xml_platform, _c
 from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
 from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs
+from .firmware_guard import validate_firmware_image
 from .utils import clear_console, log, wait_for_device, adb_shell_getprop, run_adb, run_cmd
  
 def _confirm_keep_data() -> bool:
@@ -113,6 +114,9 @@ def run_firmware_upgrade_keep_data_flow() -> None:
         return
     _log_device_extra_info()
     _cleanup_before_flow()
+    time.sleep(3)
+    if not validate_firmware_image():
+        return
     time.sleep(3)
     if not _check_flash_xml_platform(platform):
         return
