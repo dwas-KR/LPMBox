@@ -7,7 +7,7 @@ from .adb_utils import adb_reboot, kill_adb_server
 from . import adb_utils as adb_state
 from .constants import IMAGE_DIR, TOOLS_DIR, READBACK_DIR, PLATFORM_TOOLS_DIR
 from .flash_spft import launch_spft_gui, run_firmware_upgrade
-from .global_flow import _ask_country_change_plan, _check_flash_xml_platform, _cleanup_after_flow, _cleanup_before_flow, _log_device_extra_info, _prepare_prc_lkdtbo_files, _country_code_feature_enabled, wait_for_fastboot, _detect_current_ab_slot, _switch_ab_slot_fastboot
+from .global_flow import _ask_country_change_plan, _check_flash_xml_platform, _cleanup_after_flow, _cleanup_before_flow, _log_device_extra_info, _prepare_prc_lkdtbo_files, _country_code_feature_enabled, wait_for_fastboot, _detect_current_ab_slot, _switch_ab_slot_fastboot, _force_slot_a_via_adb
 from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
 from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs
@@ -150,6 +150,7 @@ def run_firmware_upgrade_keep_data_flow() -> None:
             log('country.no_change')
     if not wait_for_device():
         return
+    _force_slot_a_via_adb()
     try:
         run_adb(['reboot', 'bootloader'], capture_output=True)
     except Exception:
@@ -160,8 +161,7 @@ def run_firmware_upgrade_keep_data_flow() -> None:
         kill_adb_server()
         return
     current_slot = _detect_current_ab_slot()
-    if current_slot:
-        _switch_ab_slot_fastboot(current_slot)
+    _switch_ab_slot_fastboot(current_slot)
     log('flow.reboot_now')
     backup_platform_scatter_to_logs(platform)
     try:

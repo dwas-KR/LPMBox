@@ -345,34 +345,51 @@ def wait_for_fastboot(timeout: int = 60) -> bool:
 
 
 
+def _force_slot_a_via_adb() -> None:
+    for i in range(10):
+        ok = False
+        try:
+            result = run_adb(["shell", "bootctl", "set-active-boot-slot", "0"], capture_output=True)
+            if getattr(result, "returncode", 0) == 0:
+                ok = True
+        except Exception:
+            pass
+        if ok:
+            return
+        if i < 9:
+            time.sleep(2)
+
+
 def _switch_ab_slot_fastboot(current_slot: str | None) -> None:
-    if not current_slot:
-        log("flow.ab_slot.skip")
-        return
-    slot = current_slot.lower()
-    if slot not in ("a", "b"):
-        log("flow.ab_slot.skip")
-        return
-    slot_name = slot.upper()
+    slot = (current_slot or "").lower()
     assume_ok = slot == "a"
-    if assume_ok:
-        log("flow.ab_slot.ok", slot=slot_name)
+    if slot in ("a", "b"):
+        slot_name = slot.upper()
+        if assume_ok:
+            log("flow.ab_slot.ok", slot=slot_name)
+        else:
+            log("flow.ab_slot.switch", from_slot=slot_name, to_slot="A")
     else:
-        log("flow.ab_slot.switch", from_slot=slot_name, to_slot="A")
+        log("flow.ab_slot.switch", from_slot="UNKNOWN", to_slot="A")
     success_any = assume_ok
-    for i in range(3):
+    for i in range(10):
         ok = False
         for base_cmd in ([str(PLATFORM_TOOLS_DIR / "fastboot")], ["fastboot"]):
             try:
-                result = run_cmd(base_cmd + ["set_active", "a"])
+                result = run_cmd(base_cmd + ["set_active", "a"], timeout=10)
+                if getattr(result, "returncode", 0) == 0:
+                    ok = True
             except Exception:
-                continue
-            if getattr(result, "returncode", 0) == 0:
-                ok = True
+                pass
+            try:
+                run_cmd(base_cmd + ["--set-active=a"], timeout=10)
+            except Exception:
+                pass
+            if ok:
                 break
         if ok:
             success_any = True
-        if i < 2:
+        if i < 9:
             time.sleep(2)
     if not assume_ok:
         if success_any:
@@ -432,6 +449,7 @@ def run_global_firmware_upgrade_flow() -> None:
             log('country.no_change')
     if not wait_for_device():
         return
+    _force_slot_a_via_adb()
     try:
         run_adb(["reboot", "bootloader"])
     except Exception:
@@ -442,8 +460,7 @@ def run_global_firmware_upgrade_flow() -> None:
         log("flow.fastboot_not_detected")
         return
     current_slot = _detect_current_ab_slot()
-    if current_slot:
-        _switch_ab_slot_fastboot(current_slot)
+    _switch_ab_slot_fastboot(current_slot)
     backup_platform_scatter_to_logs(platform)
     log("preloader.waiting")
     try:
