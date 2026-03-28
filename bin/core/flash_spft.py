@@ -1,6 +1,7 @@
 import subprocess
 from pathlib import Path
 from .constants import TOOLS_DIR, SPFT_EXE, FLASH_XML_DLAGENT, FLASH_XML_ROOT, DA_AUTH_DLAGENT, DA_AUTH_ROOT
+from . import adb_utils as adb_state
 from .utils import log, log_text, _write_log_line, capture_spft_console_output_snapshot
 
 def _resolve_spft_exe() -> Path | None:
@@ -26,10 +27,9 @@ def _resolve_spft_exe() -> Path | None:
     return None
 
 def _resolve_flash_xml() -> Path | None:
-    if FLASH_XML_DLAGENT.is_file():
-        return FLASH_XML_DLAGENT
-    if FLASH_XML_ROOT.is_file():
-        return FLASH_XML_ROOT
+    for path in (FLASH_XML_DLAGENT, FLASH_XML_ROOT):
+        if path.is_file():
+            return path
     return None
  
 def _resolve_da_auth() -> Path | None:
@@ -149,6 +149,7 @@ def run_firmware_upgrade() -> bool:
 
     capture_started = False
     code: int | None = None
+    spft_stream_line_count = 0
     try:
         assert proc.stdout is not None
         import sys as _sys
@@ -164,6 +165,7 @@ def run_firmware_upgrade() -> bool:
             finally:
                 setattr(out, '_lpmbox_suppress_capture', prev_flag)
             _write_log_line(line)
+            spft_stream_line_count += 1
         code = proc.wait()
     except KeyboardInterrupt:
         print()
@@ -186,12 +188,11 @@ def run_firmware_upgrade() -> bool:
                 code = proc.wait()
             except Exception:
                 code = -1
-    try:
-        capture_spft_console_output_snapshot()
-    except Exception:
-        pass
-
-
+    if spft_stream_line_count == 0:
+        try:
+            capture_spft_console_output_snapshot()
+        except Exception:
+            pass
     if code == 0:
         log('flash.done')
         return True

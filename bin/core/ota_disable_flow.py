@@ -21,7 +21,6 @@ def run_ota_disable_flow() -> None:
     if not ok:
         kill_adb_server()
         return
-    log('ota.adb_connected')
     log('ota.disabling')
     try:
         _apply_ota_settings()

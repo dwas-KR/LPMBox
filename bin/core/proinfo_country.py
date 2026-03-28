@@ -32,7 +32,7 @@ def _patch_country(data: bytes, new_code: str) -> bytes:
     return data
 
 def _print_country_menu() -> None:
-    log_text(get_string('country.menu_line'))
+    log_text(get_string('app.menu.separator'))
     per_row = 3
     rows = []
     row = []
@@ -46,11 +46,11 @@ def _print_country_menu() -> None:
         rows.append(' '.join(row))
     for line in rows:
         log_text(line)
-    log_text(get_string('country.menu_line'))
+    log_text(get_string('app.menu.separator'))
 
 def _select_country() -> str:
     _print_country_menu()
-    log_text(get_string('country.notice'))
+    log('country.notice')
     while True:
         try:
             raw = input(get_string('country.number_prompt'))
@@ -105,8 +105,8 @@ def wait_and_patch_proinfo(platform: str) -> None:
     current = _detect_current_code(data)
     if not current:
         log('country.not_detected')
-        log('country.unknown_cable')
-        log('country.unknown_bootloop')
+        log('cable.check_1')
+        log('cable.check_2')
     new_code = _select_country()
     if not new_code:
         log('country.no_change')

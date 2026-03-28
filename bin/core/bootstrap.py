@@ -307,11 +307,12 @@ def _main_menu() -> None:
         menu.add_label(get_string('app.menu.dev_msg3'))
         menu.add_label(get_string('app.menu.dev_msg4'))
         try:
-            choice = menu.ask(prompt=get_string('app.menu.prompt'), default_key='1')
+            choice = menu.ask(prompt='', default_key='1')
         except KeyboardInterrupt:
             break
         if choice in ('1', '2') and not driver_installed:
-            log('app.mtk_driver.install_required')
+            log('app.mtk_driver.install_required_1')
+            log('app.mtk_driver.install_required_2')
             _pause_back_to_menu()
             continue
         if choice == '1':
@@ -396,11 +397,6 @@ def main() -> None:
         return
     clear_console()
     _choose_language()
-    if _quickedit_enabled():
-        try:
-            print('[!] ' + get_string('console.quickedit_warn'))
-        except Exception:
-            print('[!] QuickEdit mode is enabled. Disable QuickEdit in the console properties.')
     _check_for_updates(interactive=False)
     singleton = _acquire_single_instance_mutex()
     if not singleton:
@@ -415,7 +411,6 @@ def main() -> None:
         except EOFError:
             pass
         return
-    log('bootstrap.start')
     downloader.ensure_platform_tools()
     downloader.ensure_spflashtool()
     ok_crypto = downloader.ensure_cryptography()

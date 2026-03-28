@@ -26,7 +26,7 @@ def run_main_menu() -> None:
         print(f" x. {get_string('app.menu.exit')}")
         print(get_string('app.menu.separator'))
         try:
-            raw = input(get_string('app.menu.prompt'))
+            raw = input()
         except EOFError:
             raw = ''
         choice = raw.strip().lower()

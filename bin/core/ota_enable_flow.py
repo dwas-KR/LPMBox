@@ -32,17 +32,16 @@ def run_ota_enable_flow() -> None:
     if not wait_for_device():
         return
     region = (adb_shell_getprop('ro.config.zui.region') or '').strip()
-    region_upper = region.upper()
+    region_upper = ''.join(region.split()).upper()
     log('flow.keep_data.rom_type', region=region_upper if region_upper else region)
     if region_upper == 'ROW':
         log('ota_enable.rom_row_warn')
         return
     if region_upper == 'PRC':
         log('flow.prc.rom_prc_ok')
-    log('ota_enable.adb_connected')
     log('ota_enable.enabling')
     _restore_ota_packages()
     time.sleep(1)
     log('ota_enable.done')
-    log('ota.update_hint')
+    log('ota.software_update_hint')
     kill_adb_server()

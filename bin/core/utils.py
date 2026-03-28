@@ -21,8 +21,10 @@ from .i18n import get_string
 _log_file_path: Path | None = None
 _unauthorized_hint_shown: bool = False
 
-_ANSI_RESET = '\x1b[0m'
-_ANSI_GREEN = '\x1b[33m'
+_ANSI_RESET = "\x1b[0m"
+_ANSI_YELLOW = "\x1b[33m"
+_ANSI_GREEN = "\x1b[32m"
+_ANSI_RED = "\x1b[31m"
 
 def _ansi_enabled() -> bool:
     if os.environ.get('LPMBOX_NO_COLOR'):
@@ -32,13 +34,39 @@ def _ansi_enabled() -> bool:
     except Exception:
         return False
 
-def _colorize_line(msg: str, line: str) -> str:
-    m = msg.strip()
-    if not m or not _ansi_enabled():
+def _classify_color(message_key: str | None, line: str) -> str | None:
+    msg = (line or '').strip()
+    key = (message_key or '').strip()
+    if not msg or not _ansi_enabled():
+        return None
+    red_keys = {
+        'flash.failed', 'scatter.convert_failed', 'flow.flash_xml_missing', 'flow.flash_xml_read_error',
+        'flow.no_flash_xml', 'flow.no_da_auth', 'flash.no_spft', 'country.no_file',
+    }
+    green_keys = {
+        'flow.stage1_header', 'flow.stage2_header', 'flow.stage3_header', 'flow.stage4_header', 'flow.stage5_header',
+        'flash.done',
+    }
+    yellow_keys = {'country.change_plan_prompt', 'cable.check_1', 'cable.check_2'}
+    if key in green_keys or msg.startswith('--- ['):
+        return _ANSI_GREEN
+    low = msg.lower()
+    if key in red_keys or '실패' in msg or 'failed' in low:
+        return _ANSI_RED
+    if key in yellow_keys or msg.startswith('①') or msg.startswith('②'):
+        return _ANSI_YELLOW
+    if msg.startswith('[!]'):
+        return _ANSI_YELLOW
+    return None
+
+def _colorize_line(message_key: str | None, line: str) -> str:
+    color = _classify_color(message_key, line)
+    if not color:
         return line
-    if m.startswith('[!]'):
-        return _ANSI_GREEN + line + _ANSI_RESET
-    return line
+    return color + line + _ANSI_RESET
+
+def format_prompt_line(message_key: str, line: str) -> str:
+    return _colorize_line(message_key, line)
 
 
 def _init_log_file() -> None:
@@ -116,10 +144,10 @@ class _ConsoleLogger:
             pass
         if getattr(self, '_lpmbox_suppress_capture', False):
             return len(s)
-        self._buffer += s
+        self._buffer += s.replace('\r\n', '\n').replace('\r', '\n')
         while '\n' in self._buffer:
             line, self._buffer = self._buffer.split('\n', 1)
-            text = line.rstrip('\r')
+            text = line.strip()
             if text:
                 try:
                     _write_log_line(text)
@@ -128,6 +156,12 @@ class _ConsoleLogger:
         return len(s)
 
     def flush(self):
+        try:
+            if self._buffer.strip():
+                _write_log_line(self._buffer.strip())
+            self._buffer = ""
+        except Exception:
+            pass
         try:
             self._original.flush()
         except Exception:
@@ -171,15 +205,8 @@ def enable_console_log_capture() -> None:
         _console_logger_enabled = False
 
 
-def log(message_key: str, **kwargs) -> None:
-    msg = get_string(message_key)
-    if kwargs:
-        try:
-            msg = msg.format(**kwargs)
-        except Exception:
-            pass
-    line = msg
-    display_line = _colorize_line(msg, line)
+def _emit_log_line(line: str, message_key: str | None=None) -> None:
+    display_line = _colorize_line(message_key, line)
     try:
         import sys as _sys
         out = _sys.stdout
@@ -192,6 +219,32 @@ def log(message_key: str, **kwargs) -> None:
     except Exception:
         print(display_line)
     _write_log_line(line)
+
+
+def log(message_key: str, **kwargs) -> None:
+    msg = get_string(message_key)
+    if kwargs:
+        try:
+            msg = msg.format(**kwargs)
+        except Exception:
+            pass
+    _emit_log_line(msg, message_key)
+    followups = {
+        'flow.android_version_low': ['ota.software_update_hint'],
+        'flow.firmware_version_blocked': ['flow.firmware_version_blocked_2', 'flow.firmware_version_blocked_3'],
+        'flow.keep_data.not_global_rom': ['flow.keep_data.not_global_rom_2'],
+        'flow.platform_mismatch': ['flow.platform_mismatch_2'],
+        'flow.prc.rom_row_warn': ['flow.prc.rom_row_warn_2'],
+        'flow.ab_slot.error': ['cable.check_1', 'cable.check_2'],
+        'flow.ab_slot.skip': ['cable.check_1', 'cable.check_2'],
+        'flow.fastboot_not_detected': ['cable.check_1', 'cable.check_2'],
+        'flow.preloader_not_detected': ['cable.check_1', 'cable.check_2'],
+        'flash.failed': ['flash.failed.comment_hint'],
+    }
+    for extra_key in followups.get(message_key, []):
+        extra_msg = get_string(extra_key)
+        if extra_msg and extra_msg != extra_key:
+            _emit_log_line(extra_msg)
 
 def log_text(text: str) -> None:
     line = text
@@ -663,8 +716,14 @@ def capture_spft_console_output_snapshot() -> None:
     if not kernel32.ReadConsoleOutputCharacterW(handle, buffer, length, origin, ctypes.byref(read)):
         return
     chars = buffer[:read.value]
-    text = ''.join(chars)
-    lines = text.splitlines()
+    lines = []
+    row_width = int(width) if int(width) > 0 else 0
+    if row_width <= 0:
+        return
+    for i in range(0, len(chars), row_width):
+        row = ''.join(chars[i:i + row_width]).replace('\x00', '').rstrip()
+        if row:
+            lines.append(row)
     if not lines:
         return
     keywords = (
@@ -806,8 +865,9 @@ class TerminalMenu:
                     lines.append(_fit_display(f'    {text}', fit_width) if text else '')
         lines.append('')
         lines.append(sep)
-        if prompt:
-            lines.append(_fit_display(prompt, fit_width))
+        if prompt is not None:
+            if prompt:
+                lines.append(_fit_display(prompt, fit_width))
             try:
                 lines.append(_fit_display(get_string('prompt.use_arrow_keys'), fit_width))
             except Exception:

@@ -15,9 +15,9 @@ from .flash_spft import launch_spft_gui, run_firmware_upgrade
 from .i18n import get_string
 from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
-from .firmware_guard import validate_firmware_image
+from .firmware_guard import validate_firmware_image, detect_vendor_boot_rom_type
 from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs
-from .utils import clear_console, log, wait_for_device, _write_log_line, run_adb, run_cmd
+from .utils import clear_console, log, log_text, wait_for_device, _write_log_line, run_adb, run_cmd, format_prompt_line
 
 _SETTINGS_PATH = Path(__file__).resolve().parent / 'lang' / 'settings.json'
 
@@ -46,13 +46,18 @@ def _country_code_feature_enabled() -> bool:
             return False
     return True
 
- 
+
+def _preserve_current_scatter_xml() -> bool:
+    return (getattr(adb_state, 'LAST_IMAGE_ROM_REGION', '') or '').strip().upper() == 'PRC'
+
+
 def _cleanup_before_flow() -> None:
-    for path in IMAGE_DIR.glob('*_Android_scatter.xml'):
-        try:
-            path.unlink()
-        except OSError:
-            pass
+    if not _preserve_current_scatter_xml():
+        for path in IMAGE_DIR.glob('*_Android_scatter.xml'):
+            try:
+                path.unlink()
+            except OSError:
+                pass
     if READBACK_DIR.is_dir():
         for path in READBACK_DIR.glob('proinfo*'):
             try:
@@ -83,17 +88,22 @@ from .utils import log_text, log
 from .adb_utils import adb_shell_getprop
 
 
+def _normalize_rom_region(value: str) -> str:
+    return re.sub(r'\s+', '', value or '').upper()
+
+
 def _ask_country_change_plan() -> bool:
     code = adb_shell_getprop("ro.product.countrycode").strip()
     if not code:
         code = "UNKNOWN"
+    code = (code or '').strip().upper() or 'UNKNOWN'
     if code == "UNKNOWN":
-        log("country.unknown_cable")
-        log("country.unknown_bootloop")
+        log('cable.check_1')
+        log('cable.check_2')
     while True:
         prompt = get_string("country.change_plan_prompt").format(code=code)
         base = f"{prompt}"
-        print(base, end="")
+        print(format_prompt_line('country.change_plan_prompt', base), end="")
         raw = input().strip()
         line = f"{base}{raw}"
         _write_log_line(line)
@@ -109,11 +119,12 @@ def _cleanup_after_flow(platform: str | None=None) -> None:
         pattern = f'{platform}_Android_scatter*.xml'
     else:
         pattern = '*_Android_scatter.xml'
-    for path in IMAGE_DIR.glob(pattern):
-        try:
-            path.unlink()
-        except OSError:
-            pass
+    if not _preserve_current_scatter_xml():
+        for path in IMAGE_DIR.glob(pattern):
+            try:
+                path.unlink()
+            except OSError:
+                pass
     if READBACK_DIR.is_dir():
         for path in READBACK_DIR.glob('proinfo*'):
             try:
@@ -122,8 +133,6 @@ def _cleanup_after_flow(platform: str | None=None) -> None:
                 pass
 
 def _detect_platform() -> str | None:
-    log('flow.detect_platform')
-    log('flow.android_version_detecting')
     version = adb_shell_getprop('ro.build.version.release').strip()
     adb_state.LAST_ANDROID_VERSION_RELEASE = version
     v_num = None
@@ -134,26 +143,17 @@ def _detect_platform() -> str | None:
                 v_num = int(m.group(1))
             except Exception:
                 v_num = None
-    if v_num is not None and v_num <= 14:
-        log('flow.android_version_detected', version=version)
-    region = adb_shell_getprop('ro.config.zui.region').strip()
-    region_upper = region.upper()
-    log('flow.keep_data.rom_type', region=region_upper if region_upper else region)
-    if region_upper == 'ROW':
+    region = adb_shell_getprop('ro.config.zui.region') or ''
+    region_upper = _normalize_rom_region(region)
+    image_region = detect_vendor_boot_rom_type()
+    adb_state.LAST_DEVICE_ROM_REGION = region_upper
+    adb_state.LAST_IMAGE_ROM_REGION = image_region or ''
+    adb_state.PREFER_ROOT_FLASH_XML = False
+    if region_upper == 'ROW' and image_region == 'ROW':
         log('flow.prc.rom_row_warn')
         kill_adb_server()
         return None
-    if region_upper == 'PRC':
-        log('flow.prc.rom_prc_ok')
     if v_num is not None and v_num <= 14:
-        if v_num == 14 and region_upper == 'PRC':
-            log('ota.restore_start')
-            try:
-                from .ota_enable_flow import _restore_ota_packages
-                _restore_ota_packages()
-            except Exception:
-                pass
-            log('ota.update_hint')
         log('flow.android_version_low')
         kill_adb_server()
         return None
@@ -161,27 +161,27 @@ def _detect_platform() -> str | None:
     if not platform or not platform.startswith('MT'):
         log('flow.not_mtk')
         return None
-    log('flow.platform', platform=platform)
+    adb_state.LAST_MTK_PLATFORM = platform
     return platform
 
 def _log_device_extra_info() -> None:
     hw = adb_shell_getprop('ro.vendor.config.lgsi.hw.version').strip()
-    cpu = adb_shell_getprop('ro.vendor.config.lgsi.cpuinfo').strip()
     if not hw:
         hw = '?'
-    if not cpu:
-        cpu = '?'
-    log('flow.device_info_value', hw=hw, cpu=cpu)
-    version = adb_state.LAST_ANDROID_VERSION_RELEASE
-    if not version:
-        version = adb_shell_getprop('ro.build.version.release').strip()
-        adb_state.LAST_ANDROID_VERSION_RELEASE = version
+    adb_state.LAST_DEVICE_MODEL = hw
+    log('flow.device_info_value', hw=hw)
+    region = (getattr(adb_state, 'LAST_DEVICE_ROM_REGION', '') or '').strip().upper()
+    if region:
+        log('flow.keep_data.rom_type', region=region)
+    version = getattr(adb_state, 'LAST_ANDROID_VERSION_RELEASE', '') or adb_shell_getprop('ro.build.version.release').strip()
     if version:
+        adb_state.LAST_ANDROID_VERSION_RELEASE = version
         log('flow.android_version_detected', version=version)
-
+    platform = (getattr(adb_state, 'LAST_MTK_PLATFORM', '') or '').strip()
+    if platform:
+        log('flow.platform', platform=platform)
 
 def _prepare_prc_lkdtbo_files() -> bool:
-    log('flow.model_detecting')
     raw_model = adb_shell_getprop('ro.product.model').strip()
     adb_state.LAST_DEVICE_MODEL = raw_model
     model = None
@@ -250,79 +250,91 @@ def _prepare_prc_lkdtbo_files() -> bool:
     return True
 
 
+def _iter_flash_xml_candidates() -> list[Path]:
+    return [FLASH_XML_DLAGENT, FLASH_XML_ROOT]
+
 def _find_flash_xml() -> Path | None:
-    candidates = [FLASH_XML_ROOT, FLASH_XML_DLAGENT]
-    for path in candidates:
+    for path in _iter_flash_xml_candidates():
         if path.is_file():
             return path
     return None
 
 def _check_flash_xml_platform(platform: str) -> bool:
-    flash_xml = _find_flash_xml()
-    if flash_xml is None:
+    found_any = False
+    last_mismatch: tuple[str, str] | None = None
+    for flash_xml in _iter_flash_xml_candidates():
+        if not flash_xml.is_file():
+            continue
+        found_any = True
+        try:
+            text = flash_xml.read_text(encoding='utf-8', errors='ignore')
+        except Exception:
+            continue
+        match = re.search(r'<scatter>\.\./(MT\d+)_Android_scatter\.xml</scatter>', text)
+        if not match:
+            continue
+        flash_platform = match.group(1)
+        if flash_platform == platform:
+            log('flow.flash_xml_ok', platform=platform)
+            return True
+        last_mismatch = (flash_platform, platform)
+    if not found_any:
         log('flow.flash_xml_missing')
         return False
-    try:
-        text = flash_xml.read_text(encoding='utf-8', errors='ignore')
-    except Exception:
-        log('flow.flash_xml_read_error')
+    if last_mismatch is not None:
+        log('flow.platform_mismatch')
         return False
-    match = re.search(r'<scatter>\.\./(MT\d+)_Android_scatter\.xml</scatter>', text)
-    if not match:
-        log('flow.flash_xml_read_error')
-        return False
-    flash_platform = match.group(1)
-    if flash_platform != platform:
-        log('flow.flash_xml_mismatch', flash_platform=flash_platform, platform=platform)
-        return False
-    log('flow.flash_xml_ok', platform=platform)
-    return True
+    log('flow.flash_xml_read_error')
+    return False
 
 
 
 
 
 
-def _detect_current_ab_slot() -> str | None:
-    log("flow.ab_slot.detect")
+def _detect_current_ab_slot(log_detect: bool = True, log_current: bool = True) -> str | None:
+    if log_detect:
+        log('flow.ab_slot.detect')
     commands = [
-        [str(PLATFORM_TOOLS_DIR / "fastboot"), "getvar", "current-slot"],
-        ["fastboot", "getvar", "current-slot"],
+        [str(PLATFORM_TOOLS_DIR / 'fastboot'), 'getvar', 'current-slot'],
+        ['fastboot', 'getvar', 'current-slot'],
     ]
-    output = ""
+    output = ''
     for cmd in commands:
         try:
             result = run_cmd(cmd, timeout=10)
         except Exception:
             continue
-        text = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+        text = ((result.stdout or '') + '\n' + (result.stderr or '')).strip()
         if text:
             output = text
             break
     if not output:
-        log("flow.ab_slot.skip")
+        if log_detect:
+            log('flow.ab_slot.skip')
         return None
-    slot: str | None = None
+    slot = None
     for line in output.splitlines():
         line_lower = line.strip().lower()
-        if "current-slot" not in line_lower:
+        if 'current-slot' not in line_lower:
             continue
-        m = re.search(r"current-slot[^ab]*([ab])\b", line_lower)
+        m = re.search(r'current-slot[^ab]*([ab])\b', line_lower)
         if m:
             slot = m.group(1)
             break
         for ch in reversed(line_lower):
-            if ch in ("a", "b"):
+            if ch in ('a', 'b'):
                 slot = ch
                 break
         if slot:
             break
-    if slot not in ("a", "b"):
-        log("flow.ab_slot.skip")
+    if slot not in ('a', 'b'):
+        if log_detect:
+            log('flow.ab_slot.skip')
         return None
-    log("flow.ab_slot.current", slot=slot.upper())
+    if log_current:
+        log('flow.ab_slot.current', slot=slot.upper())
     return slot
-
 
 def wait_for_fastboot(timeout: int = 60) -> bool:
     start = time.time()
@@ -360,61 +372,69 @@ def _force_slot_a_via_adb() -> None:
             time.sleep(2)
 
 
-def _switch_ab_slot_fastboot(current_slot: str | None) -> None:
-    slot = (current_slot or "").lower()
-    assume_ok = slot == "a"
-    if slot in ("a", "b"):
-        slot_name = slot.upper()
-        if assume_ok:
-            log("flow.ab_slot.ok", slot=slot_name)
-        else:
-            log("flow.ab_slot.switch", from_slot=slot_name, to_slot="A")
+def _switch_ab_slot_fastboot(current_slot: str | None) -> bool:
+    slot = (current_slot or '').lower()
+    if slot == 'a':
+        log('flow.ab_slot.ok')
+    elif slot == 'b':
+        log('flow.ab_slot.switch', from_slot='B', to_slot='A')
     else:
-        log("flow.ab_slot.switch", from_slot="UNKNOWN", to_slot="A")
-    success_any = assume_ok
-    for i in range(10):
+        log('flow.ab_slot.switch', from_slot='UNKNOWN', to_slot='A')
+    log('flow.work_in_progress')
+
+    def _run_fastboot_any(args: list[str], timeout: int = 10) -> bool:
         ok = False
-        for base_cmd in ([str(PLATFORM_TOOLS_DIR / "fastboot")], ["fastboot"]):
+        for base_cmd in ([str(PLATFORM_TOOLS_DIR / 'fastboot')], ['fastboot']):
             try:
-                result = run_cmd(base_cmd + ["set_active", "a"], timeout=10)
-                if getattr(result, "returncode", 0) == 0:
-                    ok = True
+                cp = run_cmd(base_cmd + args, timeout=timeout)
+                ok = ok or getattr(cp, 'returncode', 1) == 0
             except Exception:
-                pass
-            try:
-                run_cmd(base_cmd + ["--set-active=a"], timeout=10)
-            except Exception:
-                pass
-            if ok:
-                break
-        if ok:
-            success_any = True
-        if i < 9:
-            time.sleep(2)
-    if not assume_ok:
-        if success_any:
-            log("flow.ab_slot.switched", slot="A")
-        else:
-            log("flow.ab_slot.error")
-    return
+                continue
+        return ok
 
+    def _set_slot_sequence() -> None:
+        for _ in range(5):
+            _run_fastboot_any(['--set-active=a'])
+            time.sleep(1)
+            _run_fastboot_any(['set_active', 'a'])
+            time.sleep(1)
+            _run_fastboot_any(['-aa'])
 
+    _set_slot_sequence()
+    _run_fastboot_any(['reboot', 'bootloader'])
+    if not wait_for_fastboot(timeout=30):
+        log('flow.fastboot_not_detected')
+        return False
+    _set_slot_sequence()
+    final_slot = _detect_current_ab_slot(log_detect=False, log_current=False)
+    if final_slot in ('a', 'b'):
+        log('flow.ab_slot.rechecked', slot=final_slot.upper())
+        if final_slot == 'a':
+            log('flow.ab_slot.ok')
+            log('flow.stability_wait')
+            time.sleep(5)
+            return True
+    log('flow.ab_slot.error')
+    _run_fastboot_any(['reboot'])
+    return False
 
 def run_global_firmware_upgrade_flow() -> None:
     clear_console()
     log('app.menu.separator')
     log('flow.start')
     log('app.menu.separator')
+    log('flow.stage1_header')
     if not wait_for_device():
         return
     time.sleep(3)
-    log('flow.device_info_check')
     platform = _detect_platform()
     if platform is None:
         return
     _log_device_extra_info()
     _cleanup_before_flow()
     time.sleep(3)
+    log_text('')
+    log('flow.stage2_header')
     if not validate_firmware_image():
         return
     time.sleep(3)
@@ -428,9 +448,11 @@ def run_global_firmware_upgrade_flow() -> None:
     if country_feature:
         change_plan = _ask_country_change_plan()
     else:
-        log('country.feature_skip')
+        log('country.no_change')
         change_plan = False
     time.sleep(3)
+    log_text('')
+    log('flow.stage3_header')
     log('flow.scatter_prepare')
     scatter_path = prepare_platform_scatter(platform, keep_user_data=False)
     if scatter_path is None:
@@ -447,31 +469,37 @@ def run_global_firmware_upgrade_flow() -> None:
     else:
         if country_feature:
             log('country.no_change')
+    log_text('')
+    log('flow.stage4_header')
     if not wait_for_device():
         return
     _force_slot_a_via_adb()
     try:
-        run_adb(["reboot", "bootloader"])
+        run_adb(['reboot', 'bootloader'])
     except Exception:
-        log("flow.fastboot_reboot_failed")
+        log('flow.fastboot_reboot_failed')
         return
-    log("flow.fastboot.detect")
+    log('flow.fastboot.detect')
     if not wait_for_fastboot(timeout=60):
-        log("flow.fastboot_not_detected")
+        log('flow.fastboot_not_detected')
         return
     current_slot = _detect_current_ab_slot()
-    _switch_ab_slot_fastboot(current_slot)
+    if not _switch_ab_slot_fastboot(current_slot):
+        return
     backup_platform_scatter_to_logs(platform)
-    log("preloader.waiting")
+    log_text('')
+    log('flow.stage5_header')
+    log('preloader.waiting')
     try:
-        run_cmd([str(PLATFORM_TOOLS_DIR / "fastboot"), "reboot"])
+        run_cmd([str(PLATFORM_TOOLS_DIR / 'fastboot'), 'reboot'])
     except Exception:
         try:
-            run_cmd(["fastboot", "reboot"])
+            run_cmd(['fastboot', 'reboot'])
         except Exception:
             pass
-    log("preloader.detected")
+    log('preloader.detected')
     run_firmware_upgrade()
     _cleanup_after_flow(platform)
     log('flow.done')
     kill_adb_server()
+

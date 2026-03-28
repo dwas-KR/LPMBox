@@ -82,8 +82,27 @@ def _load_blocked_versions(path: Path) -> dict[str, dict[str, set[str]]]:
     return result
 
 
+
+def detect_vendor_boot_rom_type() -> str | None:
+    image_path = IMAGE_DIR / 'vendor_boot-debug.img'
+    if not image_path.is_file():
+        return None
+    data = _read_bytes(image_path)
+    if not data:
+        return None
+    version = _extract_version(data)
+    section = _detect_section(data, version)
+    if section == 'PRC ROM':
+        return 'PRC'
+    if section == 'ROW ROM':
+        return 'ROW'
+    return None
+
 def validate_firmware_image() -> bool:
     log('flow.firmware_version_detecting')
+    if not IMAGE_DIR.is_dir() or not (IMAGE_DIR / 'download_agent').is_dir():
+        log('flow.image_folder_missing')
+        return False
     image_path = IMAGE_DIR / 'vendor_boot-debug.img'
     if not image_path.is_file():
         log('flow.firmware_version_file_missing')
@@ -102,6 +121,10 @@ def validate_firmware_image() -> bool:
         log('flow.firmware_version_not_found')
         return False
     section = _detect_section(data, version)
+    if section == 'PRC ROM':
+        log('flow.prc.device_row_image_prc')
+    elif section == 'ROW ROM':
+        log('flow.image_folder_row')
     blocked = _load_blocked_versions(ini_path)
     candidates: set[str] = set()
     if section:
@@ -114,3 +137,4 @@ def validate_firmware_image() -> bool:
         return False
     log('flow.firmware_version_ok')
     return True
+

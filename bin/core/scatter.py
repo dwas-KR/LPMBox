@@ -2,6 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from xml.etree import ElementTree as ET
 import shutil
+import re
 from datetime import datetime
 from .constants import IMAGE_DIR, LOGS_DIR, LKDTBO_MODEL_TO_ZIP
 from .adb_utils import adb_shell_getprop
@@ -9,33 +10,103 @@ from . import adb_utils as adb_state
 from .utils import log
 from .xml_crypto import decrypt_scatter_x
 
-def _find_scatter_x(platform: str) -> Path:
+_SCATTER_XML_RE = re.compile(r'^MT\d+_Android_scatter\.xml$', re.IGNORECASE)
+_SCATTER_X_RE = re.compile(r'^MT\d+_Android_scatter\.x$', re.IGNORECASE)
+
+
+def _iter_scatter_named_files(pattern: re.Pattern[str], base_dir: Path | None = None) -> list[Path]:
+    directory = base_dir or IMAGE_DIR
+    if not directory.is_dir():
+        return []
+    return [
+        path
+        for path in sorted(directory.iterdir())
+        if path.is_file() and pattern.fullmatch(path.name)
+    ]
+
+
+def _current_image_rom_region() -> str:
+    value = (getattr(adb_state, 'LAST_IMAGE_ROM_REGION', '') or '').strip().upper()
+    return value
+
+
+def _is_prc_image_context() -> bool:
+    return _current_image_rom_region() == 'PRC'
+
+
+def _find_scatter_source(platform: str) -> Path:
     if not IMAGE_DIR.is_dir():
         raise FileNotFoundError('image directory not found')
-    expected = IMAGE_DIR / f'{platform}_Android_scatter.x'
-    if expected.is_file():
-        return expected
-    candidates = sorted(IMAGE_DIR.glob('*_Android_scatter.x'))
-    if not candidates:
-        raise FileNotFoundError('no scatter .x file')
-    return candidates[0]
- 
-def _convert_x_to_xml(scatter_x: Path) -> Path:
-    xml_path = IMAGE_DIR / 'Android_scatter.xml'
-    log('scatter.convert', path=str(scatter_x))
-    try:
-        raw = scatter_x.read_bytes()
-        xml_text: str | None = None
+    expected_xml = IMAGE_DIR / f'{platform}_Android_scatter.xml'
+    if expected_xml.is_file():
+        return expected_xml
+    xml_candidates = _iter_scatter_named_files(_SCATTER_XML_RE, IMAGE_DIR)
+    if xml_candidates:
+        return xml_candidates[0]
+    expected_x = IMAGE_DIR / f'{platform}_Android_scatter.x'
+    if expected_x.is_file():
+        return expected_x
+    x_candidates = _iter_scatter_named_files(_SCATTER_X_RE, IMAGE_DIR)
+    if x_candidates:
+        return x_candidates[0]
+    raise FileNotFoundError('no scatter source file')
+
+
+def _scatter_text_to_xml(text: str) -> str:
+    root = ET.Element('scatter')
+    current: ET.Element | None = None
+    for raw_line in text.splitlines():
+        line = raw_line.replace('\ufeff', '').strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.endswith(':'):
+            probe = line[:-1].strip()
+            if probe in {'info', 'config', 'layout_check'}:
+                continue
+        stripped = line
+        is_dash = stripped.startswith('- ')
+        if is_dash:
+            stripped = stripped[2:].strip()
+        if ':' not in stripped:
+            continue
+        key, value = stripped.split(':', 1)
+        key = key.strip()
+        value = value.strip()
+        if key == 'general':
+            current = ET.SubElement(root, 'general')
+            if value:
+                ET.SubElement(current, 'section_name').text = value
+            continue
+        if key in {'partition_index', 'partition'} and is_dash:
+            current = ET.SubElement(root, 'partition')
+            ET.SubElement(current, 'partition_index').text = value
+            continue
+        if current is None:
+            current = ET.SubElement(root, 'general')
+        ET.SubElement(current, key).text = value
+    return ET.tostring(root, encoding='unicode')
+
+
+def _convert_source_to_xml(scatter_source: Path, platform: str) -> Path:
+    xml_path = IMAGE_DIR / f'{platform}_Android_scatter.xml'
+    if scatter_source.is_file():
         try:
-            text = raw.decode('utf-8')
-            if '<scatter' in text or '<partition_index' in text or '<partition' in text:
-                xml_text = text
-        except UnicodeDecodeError:
-            xml_text = None
-        if xml_text is None:
-            decrypted = decrypt_scatter_x(scatter_x)
+            if scatter_source.resolve() == xml_path.resolve():
+                return xml_path
+        except Exception:
+            pass
+    log('scatter.convert', path=str(scatter_source))
+    try:
+        xml_text: str | None = None
+        suffix = scatter_source.suffix.lower()
+        if suffix == '.xml':
+            xml_text = scatter_source.read_text(encoding='utf-8', errors='ignore')
+        elif suffix == '.x':
+            decrypted = decrypt_scatter_x(scatter_source)
             xml_text = decrypted.decode('utf-8', errors='ignore')
-        xml_path.write_text(xml_text, encoding='utf-8')
+        else:
+            raise ValueError('unsupported scatter source')
+        xml_path.write_text(xml_text or '', encoding='utf-8')
     except Exception:
         log('scatter.convert_failed')
         raise
@@ -43,6 +114,7 @@ def _convert_x_to_xml(scatter_x: Path) -> Path:
     return xml_path
 
 def _create_ab_scatter(xml_path: Path) -> Path:
+    log('scatter.create_ab')
     ab_path = IMAGE_DIR / 'Android_scatter_A,B.xml'
     shutil.copy2(xml_path, ab_path)
     return ab_path
@@ -78,8 +150,19 @@ def _set_text(parent: ET.Element, tag: str, text: str) -> ET.Element:
 
 
 
-def _cleanup_temp_scatter(xml_path: Path, ab_path: Path) -> None:
+def _cleanup_temp_scatter(xml_path: Path, ab_path: Path, preserve: tuple[Path, ...] = ()) -> None:
+    preserve_set = set()
+    for item in preserve:
+        try:
+            preserve_set.add(item.resolve())
+        except Exception:
+            pass
     for path in (xml_path, ab_path):
+        try:
+            if path.resolve() in preserve_set:
+                continue
+        except Exception:
+            pass
         try:
             if path.is_file():
                 path.unlink()
@@ -226,21 +309,26 @@ def apply_country_plan_to_proinfo(platform: str, enable: bool) -> None:
 
 def prepare_platform_scatter(platform: str, keep_user_data: bool) -> Path | None:
     try:
-        scatter_x = _find_scatter_x(platform)
+        scatter_source = _find_scatter_source(platform)
     except FileNotFoundError:
         log('scatter.not_found')
         return None
     platform_scatter = IMAGE_DIR / f"{platform}_Android_scatter.xml"
-    try:
-        if platform_scatter.is_file():
-            platform_scatter.unlink()
-    except OSError:
-        pass
-    xml_path = _convert_x_to_xml(scatter_x)
+    preserve_existing = _is_prc_image_context() and platform_scatter.is_file()
+    if preserve_existing:
+        xml_path = platform_scatter
+    else:
+        try:
+            if platform_scatter.is_file() and scatter_source.resolve() != platform_scatter.resolve():
+                platform_scatter.unlink()
+        except OSError:
+            pass
+        xml_path = _convert_source_to_xml(scatter_source, platform)
     ab_path = _create_ab_scatter(xml_path)
-    final_name = scatter_x.name.replace('.x', '.xml')
-    final_path = _patch_proinfo(ab_path, final_name, keep_user_data)
-    _cleanup_temp_scatter(xml_path, ab_path)
+    final_path = _patch_proinfo(ab_path, f'{platform}_Android_scatter.xml', keep_user_data)
+    hw = (getattr(adb_state, 'LAST_DEVICE_MODEL', '') or platform).strip() or platform
+    log('scatter.final_saved', hw=hw)
+    _cleanup_temp_scatter(xml_path, ab_path, preserve=(final_path,))
     return final_path
 
 def disable_lk_dtbo_partitions(platform: str) -> None:

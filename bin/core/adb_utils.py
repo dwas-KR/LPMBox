@@ -3,6 +3,9 @@ from pathlib import Path
 from .constants import PLATFORM_TOOLS_DIR
 LAST_ANDROID_VERSION_RELEASE = ''
 LAST_DEVICE_MODEL = ''
+LAST_DEVICE_ROM_REGION = ''
+LAST_IMAGE_ROM_REGION = ''
+PREFER_ROOT_FLASH_XML = False
 
  
 def _adb_path() -> str:

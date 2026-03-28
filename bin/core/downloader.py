@@ -202,12 +202,13 @@ def ensure_spflashtool() -> bool:
     except Exception:
         pass
     zip_path = TOOLS_DOWNLOAD_DIR / 'SPFlashToolV6.zip'
-    log('dl.spft_downloading')
-    try:
-        _download_from_list(SPFT_ZIP_URLS, zip_path)
-    except Exception:
-        log('dl.download_failed')
-        return False
+    if not zip_path.is_file():
+        log('dl.spft_downloading')
+        try:
+            _download_from_list(SPFT_ZIP_URLS, zip_path)
+        except Exception:
+            log('dl.download_failed')
+            return False
     log('dl.spft_extracting')
     _extract_zip(zip_path, TOOLS_DIR)
     extracted_dir = TOOLS_DIR / 'SP_Flash_Tool_V6.2404_Win'
