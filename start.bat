@@ -16,6 +16,8 @@ if not defined LOG_TS set "LOG_TS=0000.00.00_00.00.00"
 set "LOG_FILE=%ROOT%\logs\log_%LOG_TS%.log"
 set "MTK_LOG_FILE=%LOG_FILE%"
 set "LPMBOX_LOG_FILE=%LOG_FILE%"
+taskkill /F /T /IM adb.exe >nul 2>&1
+taskkill /F /T /IM fastboot.exe >nul 2>&1
 
 call "%ROOT%\bin\core\install_python.bat" "%ROOT%"
 if errorlevel 1 goto wait_exit
@@ -46,4 +48,6 @@ echo Press ENTER to exit.
 pause >nul
 
 :end
+taskkill /F /T /IM adb.exe >nul 2>&1
+taskkill /F /T /IM fastboot.exe >nul 2>&1
 endlocal

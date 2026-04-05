@@ -23,7 +23,7 @@ def _download_file(url: str, dest: Path) -> None:
         done = 0
         start = time.time()
         last_draw = 0.0
-        ncols = get_term_width(145)
+        ncols = get_term_width(108)
 
         def fmt_bytes(n: int) -> str:
             units = ['B', 'K', 'M', 'G', 'T']

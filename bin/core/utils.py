@@ -9,6 +9,7 @@ import shutil
 import unicodedata
 import re
 import hashlib
+import builtins
 try:
     import msvcrt
 except Exception:
@@ -25,6 +26,49 @@ _ANSI_RESET = "\x1b[0m"
 _ANSI_YELLOW = "\x1b[33m"
 _ANSI_GREEN = "\x1b[32m"
 _ANSI_RED = "\x1b[31m"
+SUPPORTED_MODELS = ('TB373FU', 'TB375FC', 'TB361FU', 'TB365FC', 'TB336FU', 'TB335FC')
+LTBOX_MODELS = ('TB520FU', 'TB710FU', 'TB320FC', 'TB320FU', 'TB321FC', 'TB321FU', 'TB322FC', 'TB322FU', 'TB323FC', 'TB323FU')
+
+_ANSI_RE = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]')
+_input_cursor_guard_installed = False
+
+def _set_console_cursor_visible(visible: bool) -> bool:
+    if os.name != 'nt':
+        return False
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)
+        if handle in (0, -1):
+            return False
+        class CONSOLE_CURSOR_INFO(ctypes.Structure):
+            _fields_ = [('dwSize', ctypes.c_uint32), ('bVisible', ctypes.c_int)]
+        cursor = CONSOLE_CURSOR_INFO()
+        cursor.dwSize = 25 if visible else 1
+        cursor.bVisible = 1 if visible else 0
+        return bool(kernel32.SetConsoleCursorInfo(handle, ctypes.byref(cursor)))
+    except Exception:
+        return False
+
+def hide_console_cursor() -> None:
+    _set_console_cursor_visible(False)
+
+def show_console_cursor() -> None:
+    _set_console_cursor_visible(True)
+
+def install_input_cursor_guard() -> None:
+    global _input_cursor_guard_installed
+    if _input_cursor_guard_installed:
+        return
+    original_input = builtins.input
+    def guarded_input(prompt=''):
+        hide_console_cursor()
+        try:
+            return original_input(prompt)
+        finally:
+            hide_console_cursor()
+    builtins.input = guarded_input
+    _input_cursor_guard_installed = True
 
 def _ansi_enabled() -> bool:
     if os.environ.get('LPMBOX_NO_COLOR'):
@@ -47,15 +91,15 @@ def _classify_color(message_key: str | None, line: str) -> str | None:
         'flow.stage1_header', 'flow.stage2_header', 'flow.stage3_header', 'flow.stage4_header', 'flow.stage5_header',
         'flash.done',
     }
-    yellow_keys = {'country.change_plan_prompt', 'cable.check_1', 'cable.check_2'}
+    yellow_keys = {'country.change_plan_prompt', 'fastboot.cable_1', 'fastboot.cable_2', 'fastboot.cable_3', 'cable.check_1', 'cable.check_2'}
     if key in green_keys or msg.startswith('--- ['):
         return _ANSI_GREEN
-    low = msg.lower()
-    if key in red_keys or '실패' in msg or 'failed' in low:
-        return _ANSI_RED
-    if key in yellow_keys or msg.startswith('①') or msg.startswith('②'):
+    if '[!]' in msg:
         return _ANSI_YELLOW
-    if msg.startswith('[!]'):
+    low = msg.lower()
+    if not msg.startswith('[LPMBox]') and (key in red_keys or '실패' in msg or 'failed' in low):
+        return _ANSI_RED
+    if key in yellow_keys or msg.startswith('①') or msg.startswith('②') or msg.startswith('③'):
         return _ANSI_YELLOW
     return None
 
@@ -67,6 +111,92 @@ def _colorize_line(message_key: str | None, line: str) -> str:
 
 def format_prompt_line(message_key: str, line: str) -> str:
     return _colorize_line(message_key, line)
+
+def normalize_model_name(raw: str) -> str:
+    value = (raw or '').strip().upper()
+    for model in SUPPORTED_MODELS:
+        if model in value:
+            return model
+    match = re.search(r'TB\d{3}[A-Z]{2}', value)
+    if match:
+        return match.group(0)
+    return value or '?'
+
+
+def is_supported_model_name(raw: str) -> bool:
+    return normalize_model_name(raw) in SUPPORTED_MODELS
+
+
+def classify_model_name(raw: str) -> str:
+    model = normalize_model_name(raw)
+    if model in SUPPORTED_MODELS:
+        return 'supported'
+    if model in LTBOX_MODELS:
+        return 'ltbox'
+    return 'unsupported'
+
+
+def _emit_manual_line(colored_line: str, plain_line: str) -> None:
+    try:
+        import sys as _sys
+        out = _sys.stdout
+        prev = getattr(out, '_lpmbox_suppress_capture', False)
+        try:
+            setattr(out, '_lpmbox_suppress_capture', True)
+            print(colored_line)
+        finally:
+            setattr(out, '_lpmbox_suppress_capture', prev)
+    except Exception:
+        print(colored_line)
+    _write_log_line(plain_line)
+
+
+def _warning_prefix_only(text: str) -> str:
+    if not _ansi_enabled() or '[!]' not in text:
+        return text
+    return f'{_ANSI_YELLOW}{text}{_ANSI_RESET}'
+
+
+def log_model_value(message_key: str, model: str, field_name: str = 'model') -> str:
+    normalized = normalize_model_name(model)
+    mapping_plain = {field_name: normalized, 'model': normalized, 'hw': normalized}
+    mapping_colored = dict(mapping_plain)
+    if not is_supported_model_name(model) and _ansi_enabled():
+        mapping_colored[field_name] = f'{_ANSI_RED}{normalized}{_ANSI_RESET}'
+        mapping_colored['model'] = mapping_colored[field_name]
+        mapping_colored['hw'] = mapping_colored[field_name]
+    template = get_string(message_key)
+    try:
+        plain = template.format(**mapping_plain)
+    except Exception:
+        plain = template
+    try:
+        colored = template.format(**mapping_colored)
+    except Exception:
+        colored = plain
+    _emit_manual_line(colored, plain)
+    return normalized
+
+
+def log_supported_model_block() -> None:
+    for key in ('flow.model_mismatch', 'flow.model_supported_header', 'flow.model_support_tb37x', 'flow.model_support_tb36x', 'flow.model_support_tb33x'):
+        msg = get_string(key)
+        _emit_manual_line(_warning_prefix_only(msg), msg)
+
+
+def log_model_support_messages(model: str) -> str:
+    category = classify_model_name(model)
+    if category == 'supported':
+        return category
+    log_supported_model_block()
+    if category == 'ltbox':
+        log_text('')
+        log('flow.ltbox_model_detected', model=normalize_model_name(model))
+        log('flow.use_ltbox')
+    return category
+
+def handle_unsupported_model(model: str) -> str:
+    return log_model_support_messages(model)
 
 
 def _init_log_file() -> None:
@@ -112,9 +242,12 @@ class _ConsoleLogger:
                 res: list[str] = []
                 i = 0
                 while i < len(s):
-                    if self._at_line_start and (not self._color_active) and s.startswith('[!]', i):
-                        self._color_active = True
-                        res.append(_ANSI_GREEN)
+                    if self._at_line_start and (not self._color_active):
+                        line_end = s.find('\n', i)
+                        line_probe = s[i:] if line_end == -1 else s[i:line_end]
+                        if '[!]' in line_probe:
+                            self._color_active = True
+                            res.append(_ANSI_YELLOW)
                     ch = s[i]
                     if ch == '\r' and self._color_active:
                         res.append(_ANSI_RESET)
@@ -237,9 +370,10 @@ def log(message_key: str, **kwargs) -> None:
         'flow.prc.rom_row_warn': ['flow.prc.rom_row_warn_2'],
         'flow.ab_slot.error': ['cable.check_1', 'cable.check_2'],
         'flow.ab_slot.skip': ['cable.check_1', 'cable.check_2'],
-        'flow.fastboot_not_detected': ['cable.check_1', 'cable.check_2'],
+        'flow.fastboot_not_detected': ['fastboot.cable_1', 'fastboot.cable_2', 'fastboot.cable_3'],
         'flow.preloader_not_detected': ['cable.check_1', 'cable.check_2'],
         'flash.failed': ['flash.failed.comment_hint'],
+        'flow.done': ['flow.tb37x_qna_warn'],
     }
     for extra_key in followups.get(message_key, []):
         extra_msg = get_string(extra_key)
@@ -267,6 +401,7 @@ def clear_console() -> None:
         os.system('cls')
     except Exception:
         pass
+    hide_console_cursor()
 
 def find_adb_path() -> str:
     adb = PLATFORM_TOOLS_DIR / 'adb.exe'
@@ -285,8 +420,34 @@ def kill_adb_server() -> None:
     except Exception:
         pass
 
+
+def kill_adb_processes() -> None:
+    kill_adb_server()
+    adb_path = PLATFORM_TOOLS_DIR / 'adb.exe'
+    if adb_path.is_file():
+        try:
+            subprocess.run([str(adb_path), 'kill-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+    if os.name == 'nt':
+        for _ in range(2):
+            for name in ('adb.exe', 'fastboot.exe'):
+                try:
+                    subprocess.run(['taskkill', '/F', '/T', '/IM', name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+            try:
+                os.system('taskkill /F /T /IM adb.exe >nul 2>&1')
+            except Exception:
+                pass
+            try:
+                os.system('taskkill /F /T /IM fastboot.exe >nul 2>&1')
+            except Exception:
+                pass
+            time.sleep(0.2)
+
 def wait_for_device(timeout_sec: int | None=None) -> bool:
-    global _unauthorized_hint_shown
+    unauthorized_hint_shown = False
     log('adb.wait_usb_debugging')
     start = time.time()
     while True:
@@ -311,8 +472,8 @@ def wait_for_device(timeout_sec: int | None=None) -> bool:
                 if state == 'device':
                     log('adb.device_ok', serial=sn)
                     return True
-                if state == 'unauthorized' and (not _unauthorized_hint_shown):
-                    _unauthorized_hint_shown = True
+                if state == 'unauthorized' and (not unauthorized_hint_shown):
+                    unauthorized_hint_shown = True
                     log('adb.unauthorized_hint')
         except Exception:
             pass
@@ -585,7 +746,7 @@ def download_url(url: str, dest: Path) -> None:
         done = 0
         start = time.time()
         last_draw = 0.0
-        ncols = get_term_width(145)
+        ncols = get_term_width(108)
         def fmt_bytes(n: int) -> str:
             units = ['B', 'K', 'M', 'G', 'T']
             v = float(n)
@@ -784,8 +945,9 @@ def _repeat_sep(sep_template: str, width: int) -> str:
     return ch * width
 
 def _display_width(s: str) -> int:
+    plain = _ANSI_RE.sub('', s or '')
     total = 0
-    for ch in s:
+    for ch in plain:
         if ch in '\r\n':
             continue
         if unicodedata.combining(ch):
@@ -798,7 +960,16 @@ def _fit_display(s: str, max_width: int) -> str:
         return ''
     out: list[str] = []
     used = 0
-    for ch in s:
+    i = 0
+    value = s or ''
+    while i < len(value):
+        m = _ANSI_RE.match(value, i)
+        if m:
+            out.append(m.group(0))
+            i = m.end()
+            continue
+        ch = value[i]
+        i += 1
         if ch in '\r\n':
             continue
         cw = 0 if unicodedata.combining(ch) else (2 if unicodedata.east_asian_width(ch) in ('F', 'W') else 1)
@@ -836,7 +1007,7 @@ class TerminalMenu:
         return idxs
 
     def _build_lines(self, current_index: int | None, prompt: str | None) -> tuple[list[str], dict[int, int], dict[int, tuple[str, str]]]:
-        width = get_term_width(145)
+        width = get_term_width(108)
         fit_width = max(20, width - 1)
         sep = _repeat_sep(get_string('app.menu.separator'), width)
         lines: list[str] = []
@@ -849,6 +1020,12 @@ class TerminalMenu:
             display_title = f'{self.breadcrumbs} > {self.title}'
         lines.append(_fit_display(f'  {display_title}', fit_width))
         lines.append(sep)
+        lines.append('')
+        try:
+            select_hint = get_string('app.menu.select_hint')
+        except Exception:
+            select_hint = '▶ Select: Use ↑/↓ and press Enter, or type a number'
+        lines.append(_fit_display(f'   {select_hint}', fit_width))
         lines.append('')
         for i, (k, text, selectable) in enumerate(self.items):
             if selectable and k is not None:
@@ -865,16 +1042,6 @@ class TerminalMenu:
                     lines.append(_fit_display(f'    {text}', fit_width) if text else '')
         lines.append('')
         lines.append(sep)
-        if prompt is not None:
-            if prompt:
-                lines.append(_fit_display(prompt, fit_width))
-            try:
-                lines.append(_fit_display(get_string('prompt.use_arrow_keys'), fit_width))
-            except Exception:
-                try:
-                    lines.append(_fit_display(get_string('prompt_use_arrow_keys'), fit_width))
-                except Exception:
-                    lines.append(_fit_display('Use arrow keys to navigate, Enter to select.', fit_width))
         return (lines, row_map, text_map)
 
     def _write_suppressed(self, s: str) -> None:
@@ -898,6 +1065,12 @@ class TerminalMenu:
         up = base_row - target_row
         if up < 0:
             up = 0
+        width = max(20, get_term_width(108) - 1)
+        plain = re.sub(r'\x1b\[[0-9;]*m', '', text)
+        rendered = text
+        pad = width - _display_width(plain)
+        if pad > 0:
+            rendered += ' ' * pad
         try:
             import sys as _sys
             out = _sys.stdout
@@ -906,8 +1079,8 @@ class TerminalMenu:
             try:
                 if up:
                     out.write(f'\x1b[{up}A')
-                out.write('\r\x1b[2K')
-                out.write(text)
+                out.write('\r')
+                out.write(rendered)
                 if up:
                     out.write(f'\x1b[{up}B')
                 out.flush()
@@ -930,6 +1103,7 @@ class TerminalMenu:
                     cur = i
                     break
         if msvcrt is None or os.name != 'nt':
+            hide_console_cursor()
             clear_console()
             lines, _, _ = self._build_lines(None, None)
             for line in lines:
@@ -943,11 +1117,8 @@ class TerminalMenu:
                 if choice in self.valid_keys:
                     return choice
                 print(get_string('app.menu.invalid_choice'))
+        hide_console_cursor()
         clear_console()
-        try:
-            self._write_suppressed('\x1b[?25l')
-        except Exception:
-            pass
         lines, row_map, text_map = self._build_lines(cur, prompt)
         content = '\n'.join(lines) + '\n'
         self._write_suppressed(content)
@@ -955,22 +1126,16 @@ class TerminalMenu:
         if prompt:
             self._write_suppressed('')
         prev_sel = cur
+        hide_console_cursor()
         while True:
+            hide_console_cursor()
             ch = msvcrt.getwch()
             if ch in ('\r', '\n'):
                 key = self.items[cur][0]
                 if key is None:
                     continue
-                try:
-                    self._write_suppressed('\x1b[?25h')
-                except Exception:
-                    pass
                 return key.lower()
             if ch == '\x1b':
-                try:
-                    self._write_suppressed('\x1b[?25h')
-                except Exception:
-                    pass
                 raise KeyboardInterrupt()
             if ch in ('\x00', '\xe0'):
                 code = msvcrt.getwch()
@@ -983,12 +1148,13 @@ class TerminalMenu:
                 else:
                     continue
                 if cur != prev_sel:
-                    r_prev = row_map.get(prev_sel)
-                    r_cur = row_map.get(cur)
-                    if r_prev is not None and prev_sel in text_map:
-                        self._rewrite_row(base_row, r_prev, text_map[prev_sel][1])
-                    if r_cur is not None and cur in text_map:
-                        self._rewrite_row(base_row, r_cur, text_map[cur][0])
+                    clear_console()
+                    lines, row_map, text_map = self._build_lines(cur, prompt)
+                    content = '\n'.join(lines) + '\n'
+                    self._write_suppressed(content)
+                    if prompt:
+                        self._write_suppressed('')
+                    base_row = len(lines) + 1
                     prev_sel = cur
                 continue
             if ch.isdigit():
@@ -1006,15 +1172,7 @@ class TerminalMenu:
                         break
                 choice = buf.lower()
                 if choice in self.valid_keys:
-                    try:
-                        self._write_suppressed('\x1b[?25h')
-                    except Exception:
-                        pass
                     return choice
             ch_low = ch.lower()
             if ch_low in self.valid_keys:
-                try:
-                    self._write_suppressed('\x1b[?25h')
-                except Exception:
-                    pass
                 return ch_low

@@ -128,7 +128,9 @@ def run_firmware_upgrade() -> bool:
         'download',
     ]
     command_str = f'"{exe}" -a "{da_auth}" -f "{flash_xml}" -c download'
+    command_str_plain = f'{exe} -a {da_auth} -f {flash_xml} -c download'
     log_text(f'user input cmds: {command_str}')
+    log_text(f'user input cmds: {command_str_plain}')
 
     try:
         proc = subprocess.Popen(

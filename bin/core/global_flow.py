@@ -15,9 +15,9 @@ from .flash_spft import launch_spft_gui, run_firmware_upgrade
 from .i18n import get_string
 from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
-from .firmware_guard import validate_firmware_image, detect_vendor_boot_rom_type
-from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs
-from .utils import clear_console, log, log_text, wait_for_device, _write_log_line, run_adb, run_cmd, format_prompt_line
+from .firmware_guard import validate_firmware_image, detect_vendor_boot_rom_type, inspect_vendor_boot_image, should_show_tb37x_qna_warning
+from .scatter import disable_lk_dtbo_partitions, prepare_platform_scatter, apply_country_plan_to_proinfo, backup_platform_scatter_to_logs, ensure_prc_platform_scatter
+from .utils import clear_console, log, log_text, wait_for_device, _write_log_line, run_adb, run_cmd, format_prompt_line, log_model_value, classify_model_name, log_model_support_messages, handle_unsupported_model
 
 _SETTINGS_PATH = Path(__file__).resolve().parent / 'lang' / 'settings.json'
 
@@ -48,7 +48,18 @@ def _country_code_feature_enabled() -> bool:
 
 
 def _preserve_current_scatter_xml() -> bool:
-    return (getattr(adb_state, 'LAST_IMAGE_ROM_REGION', '') or '').strip().upper() == 'PRC'
+    image_value = (getattr(adb_state, 'LAST_IMAGE_ROM_REGION', '') or '').strip().upper()
+    device_value = (getattr(adb_state, 'LAST_DEVICE_ROM_REGION', '') or '').strip().upper()
+    if image_value == 'PRC' or device_value == 'PRC':
+        return True
+    try:
+        info = inspect_vendor_boot_image()
+        region = (info.get('rom_region') or '').strip().upper()
+        if region:
+            adb_state.LAST_IMAGE_ROM_REGION = region
+        return region == 'PRC'
+    except Exception:
+        return False
 
 
 def _cleanup_before_flow() -> None:
@@ -157,32 +168,37 @@ def _detect_platform() -> str | None:
         log('flow.android_version_low')
         kill_adb_server()
         return None
-    platform = adb_shell_getprop('ro.vendor.mediatek.platform').strip()
-    if not platform or not platform.startswith('MT'):
-        log('flow.not_mtk')
-        return None
+    platform = (adb_shell_getprop('ro.vendor.mediatek.platform') or '').strip()
     adb_state.LAST_MTK_PLATFORM = platform
     return platform
 
-def _log_device_extra_info() -> None:
-    hw = adb_shell_getprop('ro.vendor.config.lgsi.hw.version').strip()
+def _log_device_extra_info() -> bool:
+    hw = (adb_shell_getprop('ro.product.model') or '').strip()
+    if not hw:
+        hw = (adb_shell_getprop('ro.vendor.config.lgsi.hw.version') or '').strip()
     if not hw:
         hw = '?'
-    adb_state.LAST_DEVICE_MODEL = hw
-    log('flow.device_info_value', hw=hw)
+    normalized_model = log_model_value('flow.device_info_value', hw, field_name='hw')
+    adb_state.LAST_DEVICE_MODEL = normalized_model
     region = (getattr(adb_state, 'LAST_DEVICE_ROM_REGION', '') or '').strip().upper()
     if region:
         log('flow.keep_data.rom_type', region=region)
-    version = getattr(adb_state, 'LAST_ANDROID_VERSION_RELEASE', '') or adb_shell_getprop('ro.build.version.release').strip()
+    version = getattr(adb_state, 'LAST_ANDROID_VERSION_RELEASE', '') or (adb_shell_getprop('ro.build.version.release') or '').strip()
+    adb_state.LAST_ANDROID_VERSION_RELEASE = version
     if version:
-        adb_state.LAST_ANDROID_VERSION_RELEASE = version
         log('flow.android_version_detected', version=version)
     platform = (getattr(adb_state, 'LAST_MTK_PLATFORM', '') or '').strip()
-    if platform:
-        log('flow.platform', platform=platform)
+    log('flow.platform', platform=platform)
+    category = classify_model_name(normalized_model)
+    if category != 'supported':
+        log_model_support_messages(normalized_model)
+        return False
+    if not platform or not platform.startswith('MT'):
+        log('flow.not_mtk')
+        return False
+    return True
 
-def _prepare_prc_lkdtbo_files() -> bool:
-    raw_model = adb_shell_getprop('ro.product.model').strip()
+def _prepare_prc_lkdtbo_files_for_model(raw_model: str) -> bool:
     adb_state.LAST_DEVICE_MODEL = raw_model
     model = None
     for key in LKDTBO_MODEL_TO_ZIP.keys():
@@ -249,6 +265,22 @@ def _prepare_prc_lkdtbo_files() -> bool:
     log('flow.lkdtbo_ready')
     return True
 
+
+def _prepare_prc_lkdtbo_files() -> bool:
+    raw_model = adb_shell_getprop('ro.product.model').strip()
+    return _prepare_prc_lkdtbo_files_for_model(raw_model)
+
+def _should_show_tb37x_qna_warning() -> bool:
+    image_info = inspect_vendor_boot_image()
+    return should_show_tb37x_qna_warning(
+        getattr(adb_state, 'LAST_DEVICE_MODEL', ''),
+        getattr(adb_state, 'LAST_IMAGE_MODEL', ''),
+        image_info.get('model', ''),
+    )
+
+def _maybe_log_tb37x_qna_warning() -> None:
+    if _should_show_tb37x_qna_warning():
+        log('flow.tb37x_qna_warn')
 
 def _iter_flash_xml_candidates() -> list[Path]:
     return [FLASH_XML_DLAGENT, FLASH_XML_ROOT]
@@ -393,7 +425,7 @@ def _switch_ab_slot_fastboot(current_slot: str | None) -> bool:
         return ok
 
     def _set_slot_sequence() -> None:
-        for _ in range(5):
+        for _ in range(3):
             _run_fastboot_any(['--set-active=a'])
             time.sleep(1)
             _run_fastboot_any(['set_active', 'a'])
@@ -418,6 +450,46 @@ def _switch_ab_slot_fastboot(current_slot: str | None) -> bool:
     _run_fastboot_any(['reboot'])
     return False
 
+
+def _trigger_rom_install_reboot_commands() -> None:
+    log('flow.reboot_stability')
+    try:
+        run_adb(['reboot'], capture_output=True)
+    except Exception:
+        pass
+    try:
+        run_cmd([str(PLATFORM_TOOLS_DIR / 'fastboot'), 'reboot'])
+    except Exception:
+        try:
+            run_cmd(['fastboot', 'reboot'])
+        except Exception:
+            pass
+
+
+def run_current_slot_stage(stage_header_key: str = 'flow.stage4_header', require_device: bool = True) -> bool:
+    log_text('')
+    log(stage_header_key)
+    if require_device:
+        if not wait_for_device():
+            return False
+    else:
+        return True
+    _force_slot_a_via_adb()
+    try:
+        run_adb(['reboot', 'bootloader'], capture_output=True)
+    except Exception:
+        log('flow.fastboot_reboot_failed')
+        return False
+    log('flow.fastboot.detect')
+    if not wait_for_fastboot(timeout=60):
+        log('flow.fastboot_not_detected')
+        return False
+    current_slot = _detect_current_ab_slot()
+    if not _switch_ab_slot_fastboot(current_slot):
+        return False
+    return True
+
+
 def run_global_firmware_upgrade_flow() -> None:
     clear_console()
     log('app.menu.separator')
@@ -430,13 +502,15 @@ def run_global_firmware_upgrade_flow() -> None:
     platform = _detect_platform()
     if platform is None:
         return
-    _log_device_extra_info()
+    if not _log_device_extra_info():
+        return
     _cleanup_before_flow()
     time.sleep(3)
     log_text('')
     log('flow.stage2_header')
     if not validate_firmware_image():
         return
+    log('flow.tb37x_qna_warn')
     time.sleep(3)
     if not _check_flash_xml_platform(platform):
         return
@@ -461,6 +535,7 @@ def run_global_firmware_upgrade_flow() -> None:
     disable_lk_dtbo_partitions(platform)
     time.sleep(3)
     apply_country_plan_to_proinfo(platform, change_plan)
+    ensure_prc_platform_scatter(platform, preserve_userdata_false=False)
     time.sleep(3)
     _delete_history_ini()
     if change_plan:
@@ -469,35 +544,14 @@ def run_global_firmware_upgrade_flow() -> None:
     else:
         if country_feature:
             log('country.no_change')
-    log_text('')
-    log('flow.stage4_header')
-    if not wait_for_device():
-        return
-    _force_slot_a_via_adb()
-    try:
-        run_adb(['reboot', 'bootloader'])
-    except Exception:
-        log('flow.fastboot_reboot_failed')
-        return
-    log('flow.fastboot.detect')
-    if not wait_for_fastboot(timeout=60):
-        log('flow.fastboot_not_detected')
-        return
-    current_slot = _detect_current_ab_slot()
-    if not _switch_ab_slot_fastboot(current_slot):
+    if not run_current_slot_stage('flow.stage4_header', require_device=True):
         return
     backup_platform_scatter_to_logs(platform)
     log_text('')
     log('flow.stage5_header')
-    log('preloader.waiting')
-    try:
-        run_cmd([str(PLATFORM_TOOLS_DIR / 'fastboot'), 'reboot'])
-    except Exception:
-        try:
-            run_cmd(['fastboot', 'reboot'])
-        except Exception:
-            pass
-    log('preloader.detected')
+    _trigger_rom_install_reboot_commands()
+    if not wait_for_preloader():
+        return
     run_firmware_upgrade()
     _cleanup_after_flow(platform)
     log('flow.done')

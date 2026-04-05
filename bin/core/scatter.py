@@ -9,9 +9,18 @@ from .adb_utils import adb_shell_getprop
 from . import adb_utils as adb_state
 from .utils import log
 from .xml_crypto import decrypt_scatter_x
+from .firmware_guard import inspect_vendor_boot_image
 
 _SCATTER_XML_RE = re.compile(r'^MT\d+_Android_scatter\.xml$', re.IGNORECASE)
 _SCATTER_X_RE = re.compile(r'^MT\d+_Android_scatter\.x$', re.IGNORECASE)
+
+PRC_TRUE_PARTITIONS = {
+    'preloader_a', 'preloader_b', 'vbmeta_a', 'vbmeta_system_a', 'vbmeta_vendor_a',
+    'spmfw_a', 'audio_dsp_a', 'pi_img_a', 'dpm_a', 'scp_a', 'ccu_a', 'vcp_a', 'sspm_a',
+    'mcupm_a', 'gpueb_a', 'apusys_a', 'mvpu_algo_a', 'gz_a', 'lk_a', 'boot_a',
+    'vendor_boot_a', 'init_boot_a', 'dtbo_a', 'tee_a', 'connsys_bt_a', 'connsys_wifi_a',
+    'connsys_gnss_a', 'logo_a', 'lenovocust', 'lenovoraw', 'super', 'userdata',
+}
 
 
 def _iter_scatter_named_files(pattern: re.Pattern[str], base_dir: Path | None = None) -> list[Path]:
@@ -27,11 +36,26 @@ def _iter_scatter_named_files(pattern: re.Pattern[str], base_dir: Path | None = 
 
 def _current_image_rom_region() -> str:
     value = (getattr(adb_state, 'LAST_IMAGE_ROM_REGION', '') or '').strip().upper()
-    return value
+    if value:
+        return value
+    try:
+        info = inspect_vendor_boot_image()
+        region = (info.get('rom_region') or '').strip().upper()
+        if region:
+            adb_state.LAST_IMAGE_ROM_REGION = region
+        return region
+    except Exception:
+        return ''
 
 
 def _is_prc_image_context() -> bool:
     return _current_image_rom_region() == 'PRC'
+
+
+def _is_prc_context_any() -> bool:
+    image_region = _current_image_rom_region()
+    device_region = (getattr(adb_state, 'LAST_DEVICE_ROM_REGION', '') or '').strip().upper()
+    return image_region == 'PRC' or device_region == 'PRC'
 
 
 def _find_scatter_source(platform: str) -> Path:
@@ -169,6 +193,103 @@ def _cleanup_temp_scatter(xml_path: Path, ab_path: Path, preserve: tuple[Path, .
         except Exception:
             pass
 
+def _disable_none_file_partitions(root: ET.Element) -> None:
+    for part, _name in _iter_partitions(root):
+        file_name = _get_text(part, 'file_name')
+        if file_name.upper() == 'NONE':
+            _ensure_child_text(part, 'is_download', 'false')
+            _ensure_child_text(part, 'is_upgradable', 'false')
+
+
+def _apply_prc_download_profile(root: ET.Element) -> None:
+    for part, name in _iter_partitions(root):
+        lower = name.lower()
+        is_enabled = lower in PRC_TRUE_PARTITIONS
+        file_name = _get_text(part, 'file_name')
+        if file_name.upper() == 'NONE':
+            is_enabled = False
+        _ensure_child_text(part, 'is_download', 'true' if is_enabled else 'false')
+    _disable_none_file_partitions(root)
+
+
+def _apply_prc_download_profile_file(scatter_path: Path) -> None:
+    if not scatter_path.is_file():
+        return
+    try:
+        tree = ET.parse(scatter_path)
+    except ET.ParseError:
+        return
+    root = tree.getroot()
+    _apply_prc_download_profile(root)
+    tree.write(scatter_path, encoding='utf-8', xml_declaration=True)
+
+
+def _resolve_lkdtbo_model(raw_model: str) -> str | None:
+    for key in LKDTBO_MODEL_TO_ZIP.keys():
+        if key in raw_model:
+            return key
+    return None
+
+
+def _should_enable_lkdtbo_for_model(raw_model: str) -> bool:
+    model = _resolve_lkdtbo_model(raw_model)
+    return model in {'TB375FC', 'TB373FU'}
+
+
+def _apply_model_lkdtbo_partitions(root: ET.Element, raw_model: str, prc_context: bool) -> bool:
+    enable = _should_enable_lkdtbo_for_model(raw_model)
+    updated = False
+    for part, name in _iter_partitions(root):
+        low = name.lower()
+        if low in {'lk_a', 'lk_b', 'dtbo_a', 'dtbo_b'}:
+            _set_text(part, 'file_name', name)
+            if prc_context:
+                slot_enable = enable and low in {'lk_a', 'dtbo_a'}
+            else:
+                slot_enable = enable
+            value = 'true' if slot_enable else 'false'
+            _set_text(part, 'is_download', value)
+            _set_text(part, 'is_upgradable', value)
+            updated = True
+    return updated
+
+def ensure_prc_platform_scatter(platform: str, preserve_userdata_false: bool = False) -> None:
+    if not _is_prc_context_any():
+        return
+    scatter_path = IMAGE_DIR / f'{platform}_Android_scatter.xml'
+    if not scatter_path.is_file():
+        return
+    try:
+        tree = ET.parse(scatter_path)
+    except ET.ParseError:
+        return
+    root = tree.getroot()
+    preserve_proinfo = None
+    preserve_userdata = None
+    raw_model = getattr(adb_state, 'LAST_DEVICE_MODEL', '') or ''
+    if not raw_model:
+        try:
+            raw_model = adb_shell_getprop('ro.product.model').strip()
+        except Exception:
+            raw_model = ''
+    for part, name in _iter_partitions(root):
+        lower = name.lower()
+        if lower == 'proinfo':
+            preserve_proinfo = (_get_text(part, 'is_download') or '').lower()
+        elif lower == 'userdata':
+            preserve_userdata = (_get_text(part, 'is_download') or '').lower()
+    _apply_prc_download_profile(root)
+    _apply_model_lkdtbo_partitions(root, raw_model, True)
+    _disable_none_file_partitions(root)
+    for part, name in _iter_partitions(root):
+        lower = name.lower()
+        if lower == 'proinfo' and preserve_proinfo == 'true':
+            _ensure_child_text(part, 'is_download', 'true')
+        elif lower == 'userdata' and preserve_userdata_false and preserve_userdata == 'false':
+            _ensure_child_text(part, 'is_download', 'false')
+    tree.write(scatter_path, encoding='utf-8', xml_declaration=True)
+
+
 def _patch_proinfo(ab_scatter: Path, final_name: str, keep_user_data: bool) -> Path:
     tree = ET.parse(ab_scatter)
     root = tree.getroot()
@@ -229,6 +350,9 @@ def _patch_proinfo(ab_scatter: Path, final_name: str, keep_user_data: bool) -> P
     if not found_proinfo:
         log('scatter.proinfo_not_found')
     _fix_ab_slots(root)
+    if _is_prc_context_any():
+        _apply_prc_download_profile(root)
+    _disable_none_file_partitions(root)
     final_path = IMAGE_DIR / final_name
     tree.write(final_path, encoding='utf-8', xml_declaration=True)
     return final_path
@@ -314,7 +438,7 @@ def prepare_platform_scatter(platform: str, keep_user_data: bool) -> Path | None
         log('scatter.not_found')
         return None
     platform_scatter = IMAGE_DIR / f"{platform}_Android_scatter.xml"
-    preserve_existing = _is_prc_image_context() and platform_scatter.is_file()
+    preserve_existing = _is_prc_context_any() and platform_scatter.is_file()
     if preserve_existing:
         xml_path = platform_scatter
     else:
@@ -348,22 +472,11 @@ def disable_lk_dtbo_partitions(platform: str) -> None:
             raw_model = adb_shell_getprop('ro.product.model').strip()
         except Exception:
             raw_model = ''
-    model = None
-    for key in LKDTBO_MODEL_TO_ZIP.keys():
-        if key in raw_model:
-            model = key
-            break
-    enable = model in {'TB375FC', 'TB373FU'}
+    enable = _should_enable_lkdtbo_for_model(raw_model)
+    prc_context = _is_prc_context_any()
     tree = ET.parse(scatter_xml)
     root = tree.getroot()
-    updated = False
-    for part, name in _iter_partitions(root):
-        low = name.lower()
-        if low in {'lk_a', 'lk_b', 'dtbo_a', 'dtbo_b'}:
-            _set_text(part, 'file_name', name)
-            _set_text(part, 'is_download', 'true' if enable else 'false')
-            _set_text(part, 'is_upgradable', 'true' if enable else 'false')
-            updated = True
+    updated = _apply_model_lkdtbo_partitions(root, raw_model, prc_context)
     if updated:
         tree.write(scatter_xml, encoding='utf-8', xml_declaration=True)
         log('scatter.lk_dtbo_enabled' if enable else 'scatter.lk_dtbo_disabled', path=str(scatter_xml))
@@ -374,9 +487,38 @@ def backup_platform_scatter_to_logs(platform: str) -> None:
         src = IMAGE_DIR / f"{platform}_Android_scatter.xml"
         if not src.is_file():
             return
+        if _is_prc_context_any():
+            return
         LOGS_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         dst = LOGS_DIR / f"{platform}_Android_scatter_{timestamp}.xml"
         shutil.copy2(src, dst)
     except Exception:
         return
+
+def prepare_country_reset_scatter(platform: str) -> Path | None:
+    scatter_path = prepare_platform_scatter(platform, keep_user_data=False)
+    if scatter_path is None or not scatter_path.is_file():
+        return None
+    try:
+        tree = ET.parse(scatter_path)
+    except ET.ParseError:
+        return None
+    root = tree.getroot()
+    found = False
+    for part, name in _iter_partitions(root):
+        low = name.lower()
+        for elem in part.iter():
+            if elem is part:
+                continue
+            if (elem.text or '').strip().lower() == 'true':
+                elem.text = 'false'
+        if low == 'proinfo':
+            _ensure_child_text(part, 'file_name', 'proinfo')
+            _ensure_child_text(part, 'is_download', 'true')
+            found = True
+    if not found:
+        log('scatter.proinfo_not_found')
+        return None
+    tree.write(scatter_path, encoding='utf-8', xml_declaration=True)
+    return scatter_path

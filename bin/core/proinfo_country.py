@@ -73,24 +73,22 @@ def _select_country() -> str:
 def wait_and_patch_proinfo(platform: str) -> None:
     READBACK_DIR.mkdir(parents=True, exist_ok=True)
     log('flow.wait_proinfo')
-    proinfo_path: Path | None = None
-    while proinfo_path is None:
-        files = list(READBACK_DIR.glob('proinfo*'))
-        if files:
-            proinfo_path = max(files, key=lambda p: p.stat().st_mtime)
-            break
-        time.sleep(3)
-    time.sleep(7)
     data: bytes | None = None
     while True:
+        files = list(READBACK_DIR.glob('proinfo*'))
+        if not files:
+            time.sleep(3)
+            continue
+        proinfo_path = max(files, key=lambda p: p.stat().st_mtime)
         try:
             data = proinfo_path.read_bytes()
             break
         except PermissionError:
-            time.sleep(1)
+            time.sleep(3)
+            continue
         except Exception:
-            data = None
-            break
+            time.sleep(3)
+            continue
     if data is None:
         log('country.no_file')
         return

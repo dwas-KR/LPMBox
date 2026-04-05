@@ -9,13 +9,8 @@ POWERSHELL_CMD = [
     "-Command",
     "(Get-PnpDevice | Where-Object { $_.FriendlyName -like '*MediaTek*' -and ($_.FriendlyName -like '*PreLoader*' -or $_.FriendlyName -like '*USB Port*' -or $_.FriendlyName -like '*VCOM*') } | Select-Object -First 1).FriendlyName"
 ]
-_preloader_wait_logged: bool = False
- 
 def wait_for_preloader(timeout: int | None=None) -> bool:
-    global _preloader_wait_logged
-    if not _preloader_wait_logged:
-        log('preloader.waiting')
-        _preloader_wait_logged = True
+    log('preloader.waiting')
     start = time.time()
     while True:
         try:
@@ -29,3 +24,4 @@ def wait_for_preloader(timeout: int | None=None) -> bool:
         if timeout is not None and time.time() - start >= timeout:
             log('adb.timeout')
             return False
+        time.sleep(1)

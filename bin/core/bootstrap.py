@@ -3,11 +3,12 @@ import sys
 import subprocess
 import time
 import json
+import atexit
 from pathlib import Path
 from .fw_upgrade_flow import run_firmware_upgrade_keep_data_flow
 from .i18n import set_language, get_string
 from .constants import PYTHON_DIR
-from .utils import log, clear_console, kill_adb_server, enable_console_log_capture, TerminalMenu
+from .utils import log, clear_console, kill_adb_server, kill_adb_processes, enable_console_log_capture, TerminalMenu, hide_console_cursor, install_input_cursor_guard
 from . import downloader
 
 
@@ -30,6 +31,8 @@ def _save_settings(data: dict) -> None:
         pass
 LANG_DIR = Path(__file__).resolve().parent / 'lang'
 SETTINGS_PATH = LANG_DIR / 'settings.json'
+_LAST_MAIN_MENU_CHOICE = '1'
+_LAST_EXTRA_MENU_CHOICE = '1'
 
 
 def setup_console() -> None:
@@ -63,9 +66,18 @@ def setup_console() -> None:
                     kernel32.SetConsoleMode(hStdOut, out_mode.value)
             except Exception:
                 pass
-        sys.stdout.write('\x1b[8;38;145t')
+            try:
+                class CONSOLE_CURSOR_INFO(ctypes.Structure):
+                    _fields_ = [('dwSize', ctypes.c_uint32), ('bVisible', ctypes.c_int)]
+                cursor = CONSOLE_CURSOR_INFO()
+                cursor.dwSize = 25
+                cursor.bVisible = 0
+                kernel32.SetConsoleCursorInfo(kernel32.GetStdHandle(-11), ctypes.byref(cursor))
+            except Exception:
+                pass
+        sys.stdout.write('\x1b[8;38;108t')
         sys.stdout.flush()
-        os.system('mode con: cols=145 lines=38')
+        os.system('mode con: cols=108 lines=38')
         try:
             import ctypes as _ct
             handle = _ct.windll.kernel32.GetStdHandle(-11)
@@ -75,7 +87,7 @@ def setup_console() -> None:
                         ('X', _ct.c_short),
                         ('Y', _ct.c_short),
                     ]
-                buffer_size = COORD(145, 2000)
+                buffer_size = COORD(108, 2000)
                 _ct.windll.kernel32.SetConsoleScreenBufferSize(handle, buffer_size)
         except Exception:
             pass
@@ -121,13 +133,16 @@ def _save_language(code: str) -> None:
     try:
         data = _load_settings()
         data['language'] = code
+        if not isinstance(data.get('initial_language'), str) or not data.get('initial_language'):
+            data['initial_language'] = code
         _save_settings(data)
     except Exception:
         pass
 
 
-def _choose_language(force_prompt: bool = False) -> None:
-    options = [
+
+def _language_options() -> list[tuple[str, str, str]]:
+    return [
         ('1', 'en', 'app.language_en'),
         ('2', 'ko', 'app.language_ko'),
         ('3', 'ru', 'app.language_ru'),
@@ -141,19 +156,42 @@ def _choose_language(force_prompt: bool = False) -> None:
         ('11', 'ar', 'app.language_ar'),
         ('12', 'es', 'app.language_es'),
     ]
-    if not force_prompt:
-        saved = _load_saved_language()
-        if saved:
-            set_language(saved)
-            return
+
+
+def _key_for_language(code: str | None) -> str:
+    mapping = {lang: key for key, lang, _ in _language_options()}
+    return mapping.get((code or '').lower(), '1')
+
+
+def _current_language_label() -> str:
+    code = _load_saved_language() or 'en'
+    for _, lang, text_key in _language_options():
+        if lang == code:
+            text = get_string(text_key)
+            if '(' in text and ')' in text:
+                inner = text.split('(', 1)[1].rsplit(')', 1)[0].strip()
+                if inner:
+                    return inner
+            return text
+    return 'English'
+
+def _choose_language(force_prompt: bool = False) -> None:
+    options = _language_options()
+    saved = _load_saved_language()
+    if not force_prompt and saved:
+        set_language(saved)
+        return
+    default_key = _key_for_language(saved)
+    if saved:
+        set_language(saved)
     while True:
         try:
-            menu = TerminalMenu(get_string('app.language_title'), breadcrumbs=get_string('breadcrumb.settings'))
+            menu = TerminalMenu(get_string('app.language_menu_title'), breadcrumbs=get_string('breadcrumb.main'))
             for key, _, text_key in options:
                 menu.add_option(key, get_string(text_key))
-            choice = menu.ask(prompt=get_string('app.language_prompt'), default_key='1')
+            choice = menu.ask(prompt='', default_key=default_key)
         except KeyboardInterrupt:
-            code = 'ko'
+            code = saved or 'ko'
             set_language(code)
             _save_language(code)
             return
@@ -165,7 +203,7 @@ def _choose_language(force_prompt: bool = False) -> None:
 
 
 def _pause_back_to_menu() -> None:
-    kill_adb_server()
+    kill_adb_processes()
     try:
         input(get_string('app.menu.back_to_menu'))
     except EOFError:
@@ -174,6 +212,21 @@ def _pause_back_to_menu() -> None:
 
 def _open_release_page() -> None:
     url = 'https://github.com/dwas-KR/LPMBox/releases'
+    if os.name == 'nt':
+        try:
+            os.startfile(url)
+            return
+        except OSError:
+            pass
+    try:
+        import webbrowser
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+
+def _open_qna_page() -> None:
+    url = 'https://dwas.tistory.com/category/%ED%94%84%EB%A1%9C%EA%B7%B8%EB%9E%A8/LPMBOX%20%2812.7%2C%2012.1%2C%2011%29'
     if os.name == 'nt':
         try:
             os.startfile(url)
@@ -268,36 +321,131 @@ def _check_for_updates(interactive: bool) -> None:
                 print(f'Failed to check for updates: {e}')
 
 
+
+
+def _color_text(text: str, color: str) -> str:
+    if not text:
+        return text
+    try:
+        from .utils import _ansi_enabled, _ANSI_YELLOW
+        if not _ansi_enabled():
+            return text
+        return f'{color}{text}\x1b[0m'
+    except Exception:
+        return text
+
+
+def _color_menu_qna(text: str) -> str:
+    try:
+        from .utils import _ANSI_YELLOW, _ansi_enabled
+        if not _ansi_enabled():
+            return text
+        return f'{_ANSI_YELLOW}{text}\x1b[0m'
+    except Exception:
+        return text
+
+
+def _driver_status_text(installed: bool) -> str:
+    status_key = 'app.mtk_driver.status_installed' if installed else 'app.mtk_driver.status_needed'
+    status = get_string(status_key)
+    try:
+        from .utils import _ANSI_GREEN, _ANSI_RED, _ansi_enabled
+        if not _ansi_enabled():
+            return status
+        color = _ANSI_GREEN if installed else _ANSI_RED
+        return f'{color}{status}\x1b[0m'
+    except Exception:
+        return status
+
+
+def _additional_options_menu() -> None:
+    from .reinstall_flow import run_firmware_reinstall_flow
+    from .country_reset_flow import run_country_code_reset_flow
+    from .mtk_driver import is_mtk_driver_installed
+    global _LAST_EXTRA_MENU_CHOICE
+    while True:
+        data = _load_settings()
+        country_feature = data.get('country_code_feature')
+        if not isinstance(country_feature, bool):
+            country_feature = True
+        skip_country = not country_feature
+        skip_status = get_string('app.toggle.on') if skip_country else get_string('app.toggle.off')
+        skip_status = _color_text(skip_status, '\x1b[32m' if skip_country else '\x1b[31m')
+        current_language = _current_language_label()
+        menu = TerminalMenu(get_string('app.extra_title'), breadcrumbs=get_string('breadcrumb.main'))
+        menu.add_option('1', get_string('app.extra.option1'))
+        menu.add_option('2', get_string('app.extra.option2'))
+        menu.add_option('3', f"{get_string('app.extra.option3')} {skip_status}")
+        menu.add_label(get_string('app.menu.short_separator'))
+        menu.add_option('7', get_string('app.extra.option7'))
+        menu.add_option('8', f"{get_string('app.extra.option8')}: [{current_language}]")
+        menu.add_label(get_string('app.menu.short_separator'))
+        menu.add_option('x', get_string('app.extra.back'))
+        try:
+            choice = menu.ask(prompt='', default_key=_LAST_EXTRA_MENU_CHOICE)
+        except KeyboardInterrupt:
+            return
+        _LAST_EXTRA_MENU_CHOICE = choice
+        if choice in ('1', '2') and not is_mtk_driver_installed():
+            log('app.mtk_driver.install_required_1')
+            log('app.mtk_driver.install_required_2')
+            _pause_back_to_menu()
+            continue
+        if choice == '1':
+            clear_console()
+            print(get_string('app.extra_title'))
+            try:
+                run_firmware_reinstall_flow()
+            except KeyboardInterrupt:
+                log('app.user_cancel')
+            _pause_back_to_menu()
+        elif choice == '2':
+            clear_console()
+            print(get_string('app.extra_title'))
+            try:
+                run_country_code_reset_flow()
+            except KeyboardInterrupt:
+                log('app.user_cancel')
+            _pause_back_to_menu()
+        elif choice == '3':
+            data['country_code_feature'] = skip_country
+            _save_settings(data)
+        elif choice == '7':
+            clear_console()
+            print(get_string('app.title'))
+            _check_for_updates(interactive=True)
+            _pause_back_to_menu()
+        elif choice == '8':
+            clear_console()
+            _choose_language(force_prompt=True)
+            return
+        elif choice == 'x':
+            return
+
+
 def _main_menu() -> None:
     from .global_flow import run_global_firmware_upgrade_flow
     from .fw_upgrade_flow import run_firmware_upgrade_keep_data_flow
     from .ota_disable_flow import run_ota_disable_flow
     from .ota_enable_flow import run_ota_enable_flow
     from .mtk_driver import is_mtk_driver_installed, open_mtk_driver_site
+    global _LAST_MAIN_MENU_CHOICE
     while True:
-        data = _load_settings()
-        country_feature = data.get('country_code_feature')
-        if not isinstance(country_feature, bool):
-            country_feature = True
         driver_installed = is_mtk_driver_installed()
-        status_key = 'app.mtk_driver.status_installed' if driver_installed else 'app.mtk_driver.status_needed'
-        status = get_string(status_key)
-        country_status_key = 'app.toggle.on' if country_feature else 'app.toggle.off'
-        country_status = get_string(country_status_key)
+        qna_text = _color_menu_qna(get_string('app.menu.option5'))
+        driver_text = f"{get_string('app.menu.option6')} {_driver_status_text(driver_installed)}"
         menu = TerminalMenu(get_string('app.title'), breadcrumbs=get_string('breadcrumb.main'))
-        menu.add_label(get_string('app.menu.section_install'))
         menu.add_option('1', get_string('app.menu.option1'))
         menu.add_option('2', get_string('app.menu.option2'))
+        menu.add_label(get_string('app.menu.short_separator'))
         menu.add_option('3', get_string('app.menu.option3'))
         menu.add_option('4', get_string('app.menu.option4'))
-        menu.add_separator()
-        menu.add_label(get_string('app.menu.section_other'))
-        menu.add_option('5', f"{get_string('app.menu.option5')} {status}")
-        menu.add_option('6', f"{get_string('app.menu.option6')} {country_status}")
+        menu.add_label(get_string('app.menu.short_separator'))
+        menu.add_option('5', qna_text)
+        menu.add_option('6', driver_text)
         menu.add_option('7', get_string('app.menu.option7'))
+        menu.add_label(get_string('app.menu.short_separator'))
         menu.add_option('8', get_string('app.menu.option8'))
-        menu.add_separator()
-        menu.add_option('9', get_string('app.menu.option9'))
         menu.add_option('x', get_string('app.menu.exit'))
         menu.add_separator()
         menu.add_rule()
@@ -307,9 +455,10 @@ def _main_menu() -> None:
         menu.add_label(get_string('app.menu.dev_msg3'))
         menu.add_label(get_string('app.menu.dev_msg4'))
         try:
-            choice = menu.ask(prompt='', default_key='1')
+            choice = menu.ask(prompt='', default_key=_LAST_MAIN_MENU_CHOICE)
         except KeyboardInterrupt:
             break
+        _LAST_MAIN_MENU_CHOICE = choice
         if choice in ('1', '2') and not driver_installed:
             log('app.mtk_driver.install_required_1')
             log('app.mtk_driver.install_required_2')
@@ -346,26 +495,18 @@ def _main_menu() -> None:
                 log('app.user_cancel')
             _pause_back_to_menu()
         elif choice == '5':
-            open_mtk_driver_site()
+            _open_qna_page()
         elif choice == '6':
-            data['country_code_feature'] = not country_feature
-            _save_settings(data)
+            open_mtk_driver_site()
         elif choice == '7':
-            clear_console()
-            print(get_string('app.title'))
-            _check_for_updates(interactive=True)
-            _pause_back_to_menu()
-        elif choice == '8':
-            clear_console()
-            _choose_language(force_prompt=True)
-        elif choice == '9':
             try:
                 os.startfile('http://www.youtube.com/@dwas_KR?sub_confirmation=1')
             except OSError:
                 pass
+        elif choice == '8':
+            _additional_options_menu()
         elif choice in ('x', 'q'):
             break
-
 
 def _acquire_single_instance_mutex():
     if os.name != 'nt':
@@ -383,8 +524,13 @@ def _acquire_single_instance_mutex():
 
 
 def main() -> None:
+    atexit.register(kill_adb_processes)
+    kill_adb_processes()
     setup_console()
+    hide_console_cursor()
     enable_console_log_capture()
+    install_input_cursor_guard()
+    hide_console_cursor()
     set_language('en')
     exe_embed = downloader.ensure_python_embed()
     if exe_embed is not None and (not _is_embedded()):
@@ -397,7 +543,6 @@ def main() -> None:
         return
     clear_console()
     _choose_language()
-    _check_for_updates(interactive=False)
     singleton = _acquire_single_instance_mutex()
     if not singleton:
         clear_console()
@@ -411,6 +556,8 @@ def main() -> None:
         except EOFError:
             pass
         return
+    _check_for_updates(interactive=False)
+    log('bootstrap.dependencies_start')
     downloader.ensure_platform_tools()
     downloader.ensure_spflashtool()
     ok_crypto = downloader.ensure_cryptography()
@@ -430,7 +577,7 @@ def main() -> None:
                 log('app.user_cancel')
                 _pause_back_to_menu()
     finally:
-        kill_adb_server()
+        kill_adb_processes()
 
 
 if __name__ == '__main__':

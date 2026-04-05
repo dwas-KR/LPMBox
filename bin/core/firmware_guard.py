@@ -1,11 +1,13 @@
 from __future__ import annotations
 from pathlib import Path
 import re
-from .constants import BLOCK_FIRMWARE_INI, IMAGE_DIR
+from .constants import BLOCK_FIRMWARE_INI, IMAGE_DIR, FLASH_XML_DLAGENT, FLASH_XML_ROOT
+from . import adb_utils as adb_state
 from .utils import log
 
 _VERSION_RE = re.compile(rb'(?:ZUI|ZUXOS)_[0-9]+(?:\.[0-9]+)+_[A-Z]+')
 _MODEL_RE = re.compile(rb'TB\d{3}[A-Z]{2}')
+_FLASH_PLATFORM_RE = re.compile(r'<scatter>\.\./(MT\d+)_Android_scatter\.xml</scatter>', re.IGNORECASE)
 
 
 def _read_bytes(path: Path) -> bytes | None:
@@ -82,21 +84,65 @@ def _load_blocked_versions(path: Path) -> dict[str, dict[str, set[str]]]:
     return result
 
 
-
-def detect_vendor_boot_rom_type() -> str | None:
+def inspect_vendor_boot_image() -> dict[str, str]:
     image_path = IMAGE_DIR / 'vendor_boot-debug.img'
+    info = {
+        'model': '',
+        'version': '',
+        'rom_region': '',
+        'rom_label': '',
+    }
     if not image_path.is_file():
-        return None
+        return info
     data = _read_bytes(image_path)
     if not data:
-        return None
-    version = _extract_version(data)
+        return info
+    version = _extract_version(data) or ''
+    model = _extract_model(data) or ''
     section = _detect_section(data, version)
+    rom_region = ''
+    rom_label = ''
     if section == 'PRC ROM':
-        return 'PRC'
-    if section == 'ROW ROM':
-        return 'ROW'
+        rom_region = 'PRC'
+        rom_label = 'PRC(중국 내수롬)'
+    elif section == 'ROW ROM':
+        rom_region = 'ROW'
+        rom_label = 'ROW(글로벌롬)'
+    info.update({
+        'model': model,
+        'version': version,
+        'rom_region': rom_region,
+        'rom_label': rom_label,
+    })
+    return info
+
+
+def inspect_flash_xml_platform() -> str | None:
+    for flash_xml in (FLASH_XML_DLAGENT, FLASH_XML_ROOT):
+        if not flash_xml.is_file():
+            continue
+        try:
+            text = flash_xml.read_text(encoding='utf-8', errors='ignore')
+        except Exception:
+            continue
+        match = _FLASH_PLATFORM_RE.search(text)
+        if match:
+            return match.group(1).upper()
     return None
+
+
+def detect_vendor_boot_rom_type() -> str | None:
+    info = inspect_vendor_boot_image()
+    return info.get('rom_region') or None
+
+
+def should_show_tb37x_qna_warning(*models: str) -> bool:
+    targets = {'TB373FU', 'TB375FC'}
+    for model in models:
+        if (model or '').strip().upper() in targets:
+            return True
+    return False
+
 
 def validate_firmware_image() -> bool:
     log('flow.firmware_version_detecting')
@@ -111,24 +157,31 @@ def validate_firmware_image() -> bool:
     if not ini_path.is_file():
         log('flow.block_firmware_missing')
         return False
-    data = _read_bytes(image_path)
-    if not data:
-        log('flow.firmware_version_not_found')
-        return False
-    version = _extract_version(data)
-    model = _extract_model(data)
+    info = inspect_vendor_boot_image()
+    version = info.get('version') or ''
+    model = info.get('model') or ''
+    rom_region = info.get('rom_region') or ''
+    platform = inspect_flash_xml_platform() or ''
+    adb_state.LAST_IMAGE_MODEL = model
+    adb_state.LAST_IMAGE_VERSION = version
+    adb_state.LAST_IMAGE_ROM_REGION = rom_region
+    adb_state.LAST_IMAGE_PLATFORM = platform
     if not version or not model:
         log('flow.firmware_version_not_found')
         return False
-    section = _detect_section(data, version)
-    if section == 'PRC ROM':
+    if rom_region == 'PRC':
         log('flow.prc.device_row_image_prc')
-    elif section == 'ROW ROM':
+    elif rom_region == 'ROW':
         log('flow.image_folder_row')
     blocked = _load_blocked_versions(ini_path)
     candidates: set[str] = set()
-    if section:
-        candidates |= blocked.get(section.upper(), {}).get(model, set())
+    section_name = ''
+    if rom_region == 'PRC':
+        section_name = 'PRC ROM'
+    elif rom_region == 'ROW':
+        section_name = 'ROW ROM'
+    if section_name:
+        candidates |= blocked.get(section_name.upper(), {}).get(model, set())
     if not candidates:
         for group in blocked.values():
             candidates |= group.get(model, set())
@@ -137,4 +190,3 @@ def validate_firmware_image() -> bool:
         return False
     log('flow.firmware_version_ok')
     return True
-
