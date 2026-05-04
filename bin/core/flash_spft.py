@@ -27,16 +27,18 @@ def _resolve_spft_exe() -> Path | None:
     return None
 
 def _resolve_flash_xml() -> Path | None:
-    for path in (FLASH_XML_DLAGENT, FLASH_XML_ROOT):
-        if path.is_file():
-            return path
+    if FLASH_XML_DLAGENT.is_file():
+        return FLASH_XML_DLAGENT
     return None
  
 def _resolve_da_auth() -> Path | None:
-    if DA_AUTH_DLAGENT.is_file():
-        return DA_AUTH_DLAGENT
-    if DA_AUTH_ROOT.is_file():
-        return DA_AUTH_ROOT
+    candidates = [
+        DA_AUTH_DLAGENT,
+        DA_AUTH_DLAGENT.with_name('da.auth'),
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
     return None
 
 def _update_history_ini(flash_xml: Path, da_auth: Path) -> None:

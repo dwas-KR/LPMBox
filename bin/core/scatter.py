@@ -11,8 +11,8 @@ from .utils import log
 from .xml_crypto import decrypt_scatter_x
 from .firmware_guard import inspect_vendor_boot_image
 
-_SCATTER_XML_RE = re.compile(r'^MT\d+_Android_scatter\.xml$', re.IGNORECASE)
-_SCATTER_X_RE = re.compile(r'^MT\d+_Android_scatter\.x$', re.IGNORECASE)
+_SCATTER_XML_RE = re.compile(r'^.+_Android_scatter\.xml$', re.IGNORECASE)
+_SCATTER_X_RE = re.compile(r'^.+_Android_scatter\.x$', re.IGNORECASE)
 
 PRC_TRUE_PARTITIONS = {
     'preloader_a', 'preloader_b', 'vbmeta_a', 'vbmeta_system_a', 'vbmeta_vendor_a',
@@ -21,6 +21,18 @@ PRC_TRUE_PARTITIONS = {
     'vendor_boot_a', 'init_boot_a', 'dtbo_a', 'tee_a', 'connsys_bt_a', 'connsys_wifi_a',
     'connsys_gnss_a', 'logo_a', 'lenovocust', 'lenovoraw', 'super', 'userdata',
 }
+
+def _is_prc_partition_enabled(lower_name: str) -> bool:
+    if lower_name in PRC_TRUE_PARTITIONS:
+        return True
+    if lower_name.endswith('_a') or lower_name.endswith('_b'):
+        bases = {
+            name[:-2] if name.endswith('_a') or name.endswith('_b') else name
+            for name in PRC_TRUE_PARTITIONS
+        }
+        return lower_name[:-2] in bases
+    return False
+
 
 
 def _iter_scatter_named_files(pattern: re.Pattern[str], base_dir: Path | None = None) -> list[Path]:
@@ -64,15 +76,21 @@ def _find_scatter_source(platform: str) -> Path:
     expected_xml = IMAGE_DIR / f'{platform}_Android_scatter.xml'
     if expected_xml.is_file():
         return expected_xml
-    xml_candidates = _iter_scatter_named_files(_SCATTER_XML_RE, IMAGE_DIR)
-    if xml_candidates:
-        return xml_candidates[0]
     expected_x = IMAGE_DIR / f'{platform}_Android_scatter.x'
     if expected_x.is_file():
         return expected_x
+    xml_candidates = _iter_scatter_named_files(_SCATTER_XML_RE, IMAGE_DIR)
+    if xml_candidates:
+        return xml_candidates[0]
     x_candidates = _iter_scatter_named_files(_SCATTER_X_RE, IMAGE_DIR)
     if x_candidates:
         return x_candidates[0]
+    glob_xml = sorted(path for path in IMAGE_DIR.glob('*Android_scatter*.xml') if path.is_file())
+    if glob_xml:
+        return glob_xml[0]
+    glob_x = sorted(path for path in IMAGE_DIR.glob('*Android_scatter*.x') if path.is_file())
+    if glob_x:
+        return glob_x[0]
     raise FileNotFoundError('no scatter source file')
 
 
@@ -204,11 +222,13 @@ def _disable_none_file_partitions(root: ET.Element) -> None:
 def _apply_prc_download_profile(root: ET.Element) -> None:
     for part, name in _iter_partitions(root):
         lower = name.lower()
-        is_enabled = lower in PRC_TRUE_PARTITIONS
+        is_enabled = _is_prc_partition_enabled(lower)
         file_name = _get_text(part, 'file_name')
         if file_name.upper() == 'NONE':
             is_enabled = False
-        _ensure_child_text(part, 'is_download', 'true' if is_enabled else 'false')
+        value = 'true' if is_enabled else 'false'
+        _ensure_child_text(part, 'is_download', value)
+        _ensure_child_text(part, 'is_upgradable', value)
     _disable_none_file_partitions(root)
 
 
@@ -243,11 +263,7 @@ def _apply_model_lkdtbo_partitions(root: ET.Element, raw_model: str, prc_context
         low = name.lower()
         if low in {'lk_a', 'lk_b', 'dtbo_a', 'dtbo_b'}:
             _set_text(part, 'file_name', name)
-            if prc_context:
-                slot_enable = enable and low in {'lk_a', 'dtbo_a'}
-            else:
-                slot_enable = enable
-            value = 'true' if slot_enable else 'false'
+            value = 'true' if enable else 'false'
             _set_text(part, 'is_download', value)
             _set_text(part, 'is_upgradable', value)
             updated = True
@@ -438,7 +454,7 @@ def prepare_platform_scatter(platform: str, keep_user_data: bool) -> Path | None
         log('scatter.not_found')
         return None
     platform_scatter = IMAGE_DIR / f"{platform}_Android_scatter.xml"
-    preserve_existing = _is_prc_context_any() and platform_scatter.is_file()
+    preserve_existing = _is_prc_image_context() and platform_scatter.is_file()
     if preserve_existing:
         xml_path = platform_scatter
     else:
@@ -477,6 +493,7 @@ def disable_lk_dtbo_partitions(platform: str) -> None:
     tree = ET.parse(scatter_xml)
     root = tree.getroot()
     updated = _apply_model_lkdtbo_partitions(root, raw_model, prc_context)
+    _disable_none_file_partitions(root)
     if updated:
         tree.write(scatter_xml, encoding='utf-8', xml_declaration=True)
         log('scatter.lk_dtbo_enabled' if enable else 'scatter.lk_dtbo_disabled', path=str(scatter_xml))

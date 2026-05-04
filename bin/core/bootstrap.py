@@ -377,8 +377,8 @@ def _additional_options_menu() -> None:
         menu.add_option('2', get_string('app.extra.option2'))
         menu.add_option('3', f"{get_string('app.extra.option3')} {skip_status}")
         menu.add_label(get_string('app.menu.short_separator'))
-        menu.add_option('7', get_string('app.extra.option7'))
-        menu.add_option('8', f"{get_string('app.extra.option8')}: [{current_language}]")
+        menu.add_option('4', get_string('app.extra.option7'))
+        menu.add_option('5', f"{get_string('app.extra.option8')}: [{current_language}]")
         menu.add_label(get_string('app.menu.short_separator'))
         menu.add_option('x', get_string('app.extra.back'))
         try:
@@ -410,12 +410,12 @@ def _additional_options_menu() -> None:
         elif choice == '3':
             data['country_code_feature'] = skip_country
             _save_settings(data)
-        elif choice == '7':
+        elif choice == '4':
             clear_console()
             print(get_string('app.title'))
             _check_for_updates(interactive=True)
             _pause_back_to_menu()
-        elif choice == '8':
+        elif choice == '5':
             clear_console()
             _choose_language(force_prompt=True)
             return

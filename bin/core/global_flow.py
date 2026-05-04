@@ -49,9 +49,8 @@ def _country_code_feature_enabled() -> bool:
 
 def _preserve_current_scatter_xml() -> bool:
     image_value = (getattr(adb_state, 'LAST_IMAGE_ROM_REGION', '') or '').strip().upper()
-    device_value = (getattr(adb_state, 'LAST_DEVICE_ROM_REGION', '') or '').strip().upper()
-    if image_value == 'PRC' or device_value == 'PRC':
-        return True
+    if image_value:
+        return image_value == 'PRC'
     try:
         info = inspect_vendor_boot_image()
         region = (info.get('rom_region') or '').strip().upper()
@@ -283,7 +282,7 @@ def _maybe_log_tb37x_qna_warning() -> None:
         log('flow.tb37x_qna_warn')
 
 def _iter_flash_xml_candidates() -> list[Path]:
-    return [FLASH_XML_DLAGENT, FLASH_XML_ROOT]
+    return [FLASH_XML_DLAGENT]
 
 def _find_flash_xml() -> Path | None:
     for path in _iter_flash_xml_candidates():

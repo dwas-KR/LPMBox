@@ -1152,8 +1152,6 @@ class TerminalMenu:
                     lines, row_map, text_map = self._build_lines(cur, prompt)
                     content = '\n'.join(lines) + '\n'
                     self._write_suppressed(content)
-                    if prompt:
-                        self._write_suppressed('')
                     base_row = len(lines) + 1
                     prev_sel = cur
                 continue

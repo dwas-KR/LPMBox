@@ -118,16 +118,16 @@ def inspect_vendor_boot_image() -> dict[str, str]:
 
 
 def inspect_flash_xml_platform() -> str | None:
-    for flash_xml in (FLASH_XML_DLAGENT, FLASH_XML_ROOT):
-        if not flash_xml.is_file():
-            continue
-        try:
-            text = flash_xml.read_text(encoding='utf-8', errors='ignore')
-        except Exception:
-            continue
-        match = _FLASH_PLATFORM_RE.search(text)
-        if match:
-            return match.group(1).upper()
+    flash_xml = FLASH_XML_DLAGENT
+    if not flash_xml.is_file():
+        return None
+    try:
+        text = flash_xml.read_text(encoding='utf-8', errors='ignore')
+    except Exception:
+        return None
+    match = _FLASH_PLATFORM_RE.search(text)
+    if match:
+        return match.group(1).upper()
     return None
 
 
