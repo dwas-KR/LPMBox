@@ -77,11 +77,39 @@ def _load_blocked_versions(path: Path) -> dict[str, dict[str, set[str]]]:
             continue
         key, value = line.split('=', 1)
         model = key.strip().upper()
-        version = value.strip().upper()
-        if not model or not version:
+        versions = [
+            item.strip().strip('"').strip("'").upper()
+            for item in value.split(',')
+            if item.strip()
+        ]
+        if not model or not versions:
             continue
-        result.setdefault(current, {}).setdefault(model, set()).add(version)
+        target = result.setdefault(current, {}).setdefault(model, set())
+        for version in versions:
+            target.add(version)
     return result
+
+
+def is_firmware_version_blocked(model: str, version: str, rom_region: str, ini_path: Path | None = None) -> bool:
+    model = (model or '').strip().upper()
+    version = (version or '').strip().upper()
+    rom_region = (rom_region or '').strip().upper()
+    path = ini_path or BLOCK_FIRMWARE_INI
+    if not model or not version or not path.is_file():
+        return False
+    blocked = _load_blocked_versions(path)
+    candidates: set[str] = set()
+    section_name = ''
+    if rom_region == 'PRC':
+        section_name = 'PRC ROM'
+    elif rom_region == 'ROW':
+        section_name = 'ROW ROM'
+    if section_name:
+        candidates |= blocked.get(section_name.upper(), {}).get(model, set())
+    if not candidates:
+        for group in blocked.values():
+            candidates |= group.get(model, set())
+    return version in candidates
 
 
 def inspect_vendor_boot_image() -> dict[str, str]:
@@ -173,19 +201,7 @@ def validate_firmware_image() -> bool:
         log('flow.prc.device_row_image_prc')
     elif rom_region == 'ROW':
         log('flow.image_folder_row')
-    blocked = _load_blocked_versions(ini_path)
-    candidates: set[str] = set()
-    section_name = ''
-    if rom_region == 'PRC':
-        section_name = 'PRC ROM'
-    elif rom_region == 'ROW':
-        section_name = 'ROW ROM'
-    if section_name:
-        candidates |= blocked.get(section_name.upper(), {}).get(model, set())
-    if not candidates:
-        for group in blocked.values():
-            candidates |= group.get(model, set())
-    if version.upper() in candidates:
+    if is_firmware_version_blocked(model, version, rom_region, ini_path):
         log('flow.firmware_version_blocked')
         return False
     log('flow.firmware_version_ok')

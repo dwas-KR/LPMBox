@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from . import adb_utils as adb_state
 from .flash_spft import launch_spft_gui, run_firmware_upgrade
-from .firmware_guard import inspect_vendor_boot_image, inspect_flash_xml_platform, should_show_tb37x_qna_warning
+from .firmware_guard import inspect_vendor_boot_image, inspect_flash_xml_platform, should_show_tb37x_qna_warning, is_firmware_version_blocked
 from .global_flow import _cleanup_after_flow, _cleanup_before_flow, _country_code_feature_enabled, _delete_history_ini, _prepare_prc_lkdtbo_files_for_model
 from .port_scan import wait_for_preloader
 from .proinfo_country import wait_and_patch_proinfo
@@ -116,6 +116,9 @@ def _inspect_image_folder() -> tuple[str, str, str] | None:
         log('flow.reinstall.image_folder_prc')
     log('flow.reinstall.version', version=version)
     log('flow.reinstall.platform', platform=platform)
+    if is_firmware_version_blocked(model, version, rom_region):
+        log('flow.firmware_version_blocked')
+        return None
     log('flow.firmware_version_ok')
     log('flow.tb37x_qna_warn')
     return model, version, platform
