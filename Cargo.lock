@@ -2502,17 +2502,16 @@ dependencies = [
 
 [[package]]
 name = "lpmbox-core"
-version = "3.0.0"
+version = "3.1.2"
 dependencies = [
  "dirs",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "lpmbox-device"
-version = "3.0.0"
+version = "3.1.2"
 dependencies = [
  "adb_client",
  "lpmbox-core",
@@ -2525,7 +2524,7 @@ dependencies = [
 
 [[package]]
 name = "lpmbox-firmware"
-version = "3.0.0"
+version = "3.1.2"
 dependencies = [
  "aes",
  "cbc",
@@ -2538,7 +2537,7 @@ dependencies = [
 
 [[package]]
 name = "lpmbox-gui"
-version = "3.0.0"
+version = "3.1.2"
 dependencies = [
  "chrono",
  "iced",
@@ -2559,9 +2558,8 @@ dependencies = [
 
 [[package]]
 name = "lpmbox-spft"
-version = "3.0.0"
+version = "3.1.2"
 dependencies = [
- "dirs",
  "lpmbox-core",
  "ureq",
  "zip",

@@ -1,17 +1,12 @@
 /target/
+/tools/download/
+/tools/MTK-Driver/
 /logs/
 /backup/
-/adb/
-/tools/
+/work/
 /readback_config.xml
-/SPFlashToolV6_tool.zip
-
-crates/lpmbox-spft/assets/SPFlashToolV6_tool.zip
-
+*.part
+*.tmp
 *.bak
 *.bak-*
-*.tmp
-*.log
 
-.DS_Store
-Thumbs.db

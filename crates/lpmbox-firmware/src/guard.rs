@@ -1,10 +1,10 @@
 use crate::patch_plan::{apply_patch_plans, build_patch_plans, validate_patch_results};
 use crate::scatter::parse_scatter_xml_text;
 use crate::xml_crypto::decrypt_scatter_x;
-use lpmbox_core::{app_paths, BlockedFirmwareCheck, FirmwareInfo, LpmError, Result, RomRegion};
+use lpmbox_core::{BlockedFirmwareCheck, FirmwareInfo, LpmError, Result, RomRegion};
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{OnceLock, RwLock};
 
 const SUPPORTED_MODELS: &[&str] = &[
     "TB375FC", "TB373FU", "TB365FC", "TB361FU", "TB335FC", "TB336FU",
@@ -23,111 +23,93 @@ const PRC_REGION_TOKENS: &[&str] = &[
 
 const ROW_REGION_TOKENS: &[&str] = &["ROW_OPEN", "OW_OPEN", "ROW_OPEN_USER", "OW_OPEN_USER"];
 
-const BLOCK_FIRMWARE_URLS: &[&str] = &[
-    "https://github.com/dwas-KR/LPMBox/blob/7c849df378277555111383e5f9d52189736e494a/block_firmware.ini",
-];
+const BLOCK_FIRMWARE_RULES_URL: &str =
+    "https://raw.githubusercontent.com/dwas-KR/LPMBox/refs/heads/Downloads/block_firmware.ini";
 
-pub fn refresh_block_firmware_ini() -> Result<PathBuf> {
-    let path = app_paths::block_firmware_ini_path();
+static BLOCK_FIRMWARE_RULES: OnceLock<RwLock<Option<String>>> = OnceLock::new();
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    if path.exists() {
-        fs::remove_file(&path).map_err(|err| {
-            LpmError::FileNotFound(format!(
-                "기존 block_firmware.ini 제거 실패: {} / {err}",
-                path.display()
-            ))
-        })?;
-    }
-
-    let mut last_error = String::new();
-
-    for raw_url in BLOCK_FIRMWARE_URLS {
-        let Some(url) = normalize_block_firmware_url(raw_url) else {
-            continue;
-        };
-
-        match download_text_file(&url) {
-            Ok(text) => {
-                let trimmed = text.trim_start();
-
-                if trimmed.starts_with("<!DOCTYPE")
-                    || trimmed.starts_with("<html")
-                    || trimmed.contains("<html")
-                {
-                    last_error = format!("HTML 페이지가 내려왔습니다: {url}");
-                    continue;
-                }
-
-                let mut file = fs::File::create(&path)?;
-                file.write_all(text.as_bytes())?;
-
-                let size = fs::metadata(&path)
-                    .map(|metadata| metadata.len())
-                    .unwrap_or(0);
-
-                if size == 0 {
-                    last_error = format!("다운로드된 파일 크기가 0입니다: {}", path.display());
-                    let _ = fs::remove_file(&path);
-                    continue;
-                }
-
-                return Ok(path);
-            }
-
-            Err(err) => {
-                last_error = format!("{url} / {err}");
-            }
-        }
-    }
-
-    Err(LpmError::FileNotFound(format!(
-        "block_firmware.ini 다운로드 실패: {last_error}"
-    )))
+fn block_firmware_rules_cache() -> &'static RwLock<Option<String>> {
+    BLOCK_FIRMWARE_RULES.get_or_init(|| RwLock::new(None))
 }
 
-fn normalize_block_firmware_url(url: &str) -> Option<String> {
-    if url.starts_with("blob:") {
-        return None;
-    }
-
-    if let Some(rest) = url.strip_prefix("https://github.com/") {
-        if rest.contains("/blob/") {
-            let mut parts = rest.splitn(4, '/');
-
-            let owner = parts.next()?;
-            let repo = parts.next()?;
-            let _blob = parts.next()?;
-            let commit_and_path = parts.next()?;
-
-            return Some(format!(
-                "https://raw.githubusercontent.com/{owner}/{repo}/{commit_and_path}"
-            ));
-        }
-    }
-
-    Some(url.to_string())
+pub fn block_firmware_rules_url() -> &'static str {
+    BLOCK_FIRMWARE_RULES_URL
 }
 
-fn download_text_file(url: &str) -> Result<String> {
+pub fn refresh_block_firmware_rules() -> Result<usize> {
+    let text = download_text(BLOCK_FIRMWARE_RULES_URL)?;
+    validate_block_firmware_rules(&text)?;
+    let size = text.len();
+    let mut cache = block_firmware_rules_cache()
+        .write()
+        .map_err(|_| LpmError::FileNotFound("차단 펌웨어 규칙 메모리 잠금 실패".to_string()))?;
+    *cache = Some(text);
+    Ok(size)
+}
+
+fn cached_block_firmware_rules() -> Option<String> {
+    block_firmware_rules_cache()
+        .read()
+        .ok()
+        .and_then(|cache| cache.clone())
+}
+
+fn block_firmware_rules_for_inspection() -> Option<String> {
+    if let Some(text) = cached_block_firmware_rules() {
+        return Some(text);
+    }
+
+    refresh_block_firmware_rules().ok()?;
+    cached_block_firmware_rules()
+}
+
+fn download_text(url: &str) -> Result<String> {
     let response = ureq::get(url)
-        .set("User-Agent", "Mozilla/5.0")
+        .set("User-Agent", concat!("LPMBox/", env!("CARGO_PKG_VERSION")))
+        .set("Cache-Control", "no-cache")
+        .set("Pragma", "no-cache")
         .call()
-        .map_err(|err| LpmError::FileNotFound(format!("다운로드 실패: {err}")))?;
+        .map_err(|err| LpmError::FileNotFound(format!("차단 펌웨어 규칙 확인 실패: {err}")))?;
 
     if !(200..300).contains(&response.status()) {
         return Err(LpmError::FileNotFound(format!(
-            "HTTP 상태 코드 오류: {}",
+            "차단 펌웨어 규칙 HTTP 상태 코드 오류: {}",
             response.status()
         )));
     }
 
     response
         .into_string()
-        .map_err(|err| LpmError::FileNotFound(format!("응답 읽기 실패: {err}")))
+        .map_err(|err| LpmError::FileNotFound(format!("차단 펌웨어 규칙 응답 읽기 실패: {err}")))
+}
+
+fn validate_block_firmware_rules(text: &str) -> Result<()> {
+    let trimmed = text.trim();
+
+    if trimmed.is_empty() {
+        return Err(LpmError::FileNotFound(
+            "차단 펌웨어 규칙 응답이 비어 있습니다.".to_string(),
+        ));
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+
+    if lower.starts_with("<!doctype") || lower.starts_with("<html") || lower.contains("<html") {
+        return Err(LpmError::FileNotFound(
+            "차단 펌웨어 규칙 대신 HTML 응답을 받았습니다.".to_string(),
+        ));
+    }
+
+    if !SUPPORTED_MODELS
+        .iter()
+        .any(|model| !blocked_versions_for_model(model, trimmed).is_empty())
+    {
+        return Err(LpmError::FileNotFound(
+            "차단 펌웨어 규칙에서 지원 모델 항목을 찾지 못했습니다.".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 pub fn inspect_firmware(image_dir: &Path) -> Result<FirmwareInfo> {
@@ -155,8 +137,8 @@ pub fn inspect_firmware(image_dir: &Path) -> Result<FirmwareInfo> {
 
     let version = extract_version(&upper);
     let region = extract_region(&upper, version.as_deref());
-    let blocked_firmware_check =
-    check_blocked_firmware(&model, version.as_deref(), &app_paths::block_firmware_ini_path());
+    let rules = block_firmware_rules_for_inspection();
+    let blocked_firmware_check = check_blocked_firmware(&model, version.as_deref(), rules.as_deref());
 
     let flash_xml = find_flash_xml(image_dir);
 
@@ -202,9 +184,11 @@ pub fn inspect_firmware(image_dir: &Path) -> Result<FirmwareInfo> {
 fn check_blocked_firmware(
     model: &str,
     version: Option<&str>,
-    ini_path: &Path,
+    rules: Option<&str>,
 ) -> BlockedFirmwareCheck {
-    let blocked_versions = blocked_versions_for_model(model, ini_path);
+    let blocked_versions = rules
+        .map(|text| blocked_versions_for_model(model, text))
+        .unwrap_or_default();
     let normalized_version = version.map(normalize_version);
 
     let matched_version = normalized_version.as_deref().and_then(|current| {
@@ -215,10 +199,11 @@ fn check_blocked_firmware(
     });
 
     let blocked = matched_version.is_some();
+    let checked = rules.is_some();
 
-    let source = ini_path.display().to_string();
-
-    let message = if let Some(matched) = &matched_version {
+    let message = if !checked {
+        format!("{model} 차단 펌웨어 규칙을 온라인에서 확인하지 못했습니다.")
+    } else if let Some(matched) = &matched_version {
         format!("{model} {matched} 버전은 설치 금지 목록에 포함되어 있습니다.")
     } else if blocked_versions.is_empty() {
         format!("{model} 모델의 설치 금지 버전이 등록되어 있지 않습니다.")
@@ -232,9 +217,9 @@ fn check_blocked_firmware(
     };
 
     BlockedFirmwareCheck {
-        checked: ini_path.is_file(),
+        checked,
         blocked,
-        source,
+        source: BLOCK_FIRMWARE_RULES_URL.to_string(),
         model: model.to_string(),
         version: version.map(|value| value.to_string()),
         blocked_versions,
@@ -243,22 +228,16 @@ fn check_blocked_firmware(
     }
 }
 
-fn blocked_versions_for_model(model: &str, ini_path: &Path) -> Vec<String> {
-    let Ok(text) = fs::read_to_string(ini_path) else {
-        return Vec::new();
-    };
-
+fn blocked_versions_for_model(model: &str, text: &str) -> Vec<String> {
     for raw_line in text.lines() {
+        let raw_line = raw_line.trim_start_matches('\u{feff}');
         let line = strip_inline_comment(raw_line).trim();
 
         if line.is_empty() {
             continue;
         }
 
-        let pair = line
-            .split_once(':')
-            .or_else(|| line.split_once('='));
-
+        let pair = line.split_once(':').or_else(|| line.split_once('='));
         let Some((left, right)) = pair else {
             continue;
         };
@@ -289,11 +268,7 @@ fn strip_inline_comment(line: &str) -> &str {
         (None, None) => None,
     };
 
-    if let Some(index) = cut_at {
-        &line[..index]
-    } else {
-        line
-    }
+    cut_at.map_or(line, |index| &line[..index])
 }
 
 fn normalize_version(version: &str) -> String {

@@ -3,7 +3,7 @@ use lpmbox_core::{
     SpftProgress, app_paths,
 };
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Cursor, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -15,6 +15,11 @@ use std::os::windows::process::CommandExt;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+const SPFT_TOOL_ZIP: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/SPFlashToolV6_tool.zip"
+));
 
 const SPFT_TOOL_REVISION: &str = "spflashtoolv6_official_v6_2404_20260615_a";
 
@@ -77,9 +82,6 @@ pub fn prepare_proinfo_readback(selected_path: &Path) -> Result<ProinfoReadbackP
     })
 }
 
-pub fn execute_proinfo_readback(selected_path: &Path) -> Result<ProinfoReadbackResult> {
-    execute_proinfo_readback_streaming(selected_path, |_| {})
-}
 
 pub fn execute_proinfo_readback_streaming<F>(
     selected_path: &Path,
@@ -550,19 +552,24 @@ fn ensure_embedded_spflashtoolv6_tool() -> Result<PathBuf> {
         return Ok(tool_dir);
     }
 
-    if spft_exe.is_file() && validate_extracted_spflashtoolv6_tool(&tool_dir).is_ok() {
-        fs::write(&marker, SPFT_TOOL_REVISION)?;
-        return Ok(tool_dir);
-    }
-
     if tool_dir.exists() {
         fs::remove_dir_all(&tool_dir)?;
     }
 
     fs::create_dir_all(&tool_dir)?;
 
-    let zip_path = resolve_spflashtoolv6_zip_for_runtime()?;
-    extract_spflashtoolv6_zip_file(&zip_path, &tool_dir)?;
+    let zip_result = download_official_spflashtoolv6_zip()
+        .or_else(|_download_err| cached_official_spflashtoolv6_zip());
+
+    match zip_result {
+        Ok(zip_path) => {
+            extract_spflashtoolv6_zip_file(&zip_path, &tool_dir)?;
+        }
+
+        Err(_download_err) => {
+            extract_embedded_spflashtoolv6_zip(&tool_dir)?;
+        }
+    }
 
     cleanup_spft_wrapper_dirs(&tool_dir)?;
 
@@ -571,54 +578,6 @@ fn ensure_embedded_spflashtoolv6_tool() -> Result<PathBuf> {
     validate_extracted_spflashtoolv6_tool(&tool_dir)?;
 
     Ok(tool_dir)
-}
-
-fn resolve_spflashtoolv6_zip_for_runtime() -> Result<PathBuf> {
-    match download_official_spflashtoolv6_zip() {
-        Ok(zip_path) => Ok(zip_path),
-        Err(download_err) => cached_official_spflashtoolv6_zip()
-            .or_else(|cache_err| local_development_spflashtoolv6_zip().map_err(|local_err| {
-                spflashtoolv6_tool_unavailable_error(download_err, cache_err, local_err)
-            })),
-    }
-}
-
-fn local_development_spflashtoolv6_zip() -> Result<PathBuf> {
-    let zip_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("assets")
-        .join("SPFlashToolV6_tool.zip");
-
-    if !zip_path.is_file() {
-        return Err(LpmError::FileNotFound(zip_path.display().to_string()));
-    }
-
-    let size = fs::metadata(&zip_path)?.len();
-
-    if size == 0 {
-        return Err(LpmError::Spft(format!(
-            "SPFlashToolV6 ZIP 파일 크기가 0입니다: {}",
-            zip_path.display()
-        )));
-    }
-
-    Ok(zip_path)
-}
-
-fn spflashtoolv6_tool_unavailable_error(
-    download_err: LpmError,
-    cache_err: LpmError,
-    local_err: LpmError,
-) -> LpmError {
-    let cache_path = app_paths::spflashtoolv6_zip_path();
-    let local_asset_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("assets")
-        .join("SPFlashToolV6_tool.zip");
-
-    LpmError::Spft(format!(
-        "SPFlashToolV6 도구를 준비하지 못했습니다.\n\n공식 다운로드가 실패했고, 기존 캐시 ZIP도 찾지 못했습니다.\n\n다운로드 링크: {SPFT_OFFICIAL_ZIP_URL}\n수동 배치 위치 1: {}\n수동 배치 위치 2: {}\n\nGitHub 저장소에는 SPFlashToolV6_tool.zip을 포함하지 않으므로, 위 링크에서 ZIP을 다운로드한 뒤 수동 배치 위치 중 하나에 넣고 다시 실행해주세요.\n\n다운로드 오류: {download_err}\n캐시 확인 오류: {cache_err}\n로컬 assets 확인 오류: {local_err}",
-        cache_path.display(),
-        local_asset_path.display()
-    ))
 }
 
 fn download_official_spflashtoolv6_zip() -> Result<PathBuf> {
@@ -819,6 +778,57 @@ fn embedded_tool_dir() -> PathBuf {
     app_paths::spflashtoolv6_dir()
 }
 
+fn extract_embedded_spflashtoolv6_zip(target_dir: &Path) -> Result<()> {
+    let reader = Cursor::new(SPFT_TOOL_ZIP);
+    let mut archive = zip::ZipArchive::new(reader).map_err(zip_error)?;
+
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).map_err(zip_error)?;
+
+        let Some(enclosed_name) = file.enclosed_name().map(|path| path.to_path_buf()) else {
+            continue;
+        };
+
+        if should_skip_tool_entry(&enclosed_name) {
+            continue;
+        }
+
+        let out_path = target_dir.join(&enclosed_name);
+
+        if file.is_dir() {
+            fs::create_dir_all(&out_path)?;
+            continue;
+        }
+
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut out_file = fs::File::create(&out_path)?;
+        io::copy(&mut file, &mut out_file)?;
+    }
+
+    Ok(())
+}
+
+fn should_skip_tool_entry(path: &Path) -> bool {
+    let Some(first_component) = path.components().next() else {
+        return true;
+    };
+
+    match first_component {
+        Component::Normal(name) => {
+            let name = name.to_string_lossy();
+
+            name.eq_ignore_ascii_case("BackupData")
+                || name.eq_ignore_ascii_case("__MACOSX")
+                || name.starts_with('.')
+        }
+
+        _ => true,
+    }
+}
+
 fn validate_extracted_spflashtoolv6_tool(tool_dir: &Path) -> Result<()> {
     let required = [
         tool_dir.join("SPFlashToolV6.exe"),
@@ -840,7 +850,7 @@ fn validate_extracted_spflashtoolv6_tool(tool_dir: &Path) -> Result<()> {
 
     if !missing.is_empty() {
         return Err(LpmError::Spft(format!(
-            "SPFlashToolV6 준비 후 필수 파일이 없습니다: {}",
+            "내장 SPFlashToolV6 추출 후 필수 파일이 없습니다: {}",
             missing.join(" / ")
         )));
     }

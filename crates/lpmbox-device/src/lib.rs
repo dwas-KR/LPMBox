@@ -39,7 +39,8 @@ const SLOT_A_ADB_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 const ADB_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const ADB_CONNECT_RETRY_ATTEMPTS: usize = 3;
 const ADB_CONNECT_RETRY_BACKOFF: Duration = Duration::from_millis(150);
-const SPINNER_FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
+const SPINNER_FRAMES: [&str; 4] = ["│", "╱", "━", "╲"];
+const INTERNAL_SPINNER_PREFIX: &str = "\u{001e}LPMBOX_SPINNER\u{001f}";
 
 const FASTBOOT_USB_CLASS: u8 = 0xFF;
 const FASTBOOT_USB_SUBCLASS: u8 = 0x42;
@@ -126,7 +127,7 @@ pub fn probe_adb_device_for_convert_wipe<F>(mut on_log: F) -> Result<AdbDevicePr
 
     on_log(spinner_log(
         "adb_detect_start",
-        "[ADB] 기기 감지 |",
+        "[ADB] 기기 감지 │",
     ));
 
     on_log(ADB_UNAUTHORIZED_GUIDE.to_string());
@@ -218,7 +219,7 @@ where
 {
     on_log(spinner_log(
         "adb_slot_detect",
-        "[ADB] 기기를 감지하고 있습니다... |",
+        "[ADB] 기기를 감지하고 있습니다... │",
     ));
 
     wait_for_adb_device_ready_until(&mut on_log, adb_timeout)?;
@@ -230,7 +231,7 @@ where
 
     on_log(spinner_log(
         "adb_slot_set",
-        "[ADB] ADB 명령어로 Slot 설정 중... |",
+        "[ADB] ADB 명령어로 Slot 설정 중... │",
     ));
 
     let mut bootctl_ok = false;
@@ -272,7 +273,7 @@ where
 
     on_log(spinner_log(
         "fastboot_detect",
-        "[Fastboot] 기기 감지중... |",
+        "[Fastboot] 기기 감지중... │",
     ));
     wait_for_fastboot_device(Duration::from_secs(60))?;
     on_log(spinner_log(
@@ -292,7 +293,7 @@ where
 
     on_log(spinner_log(
         "fastboot_reboot_bootloader",
-        "[Fastboot] bootloader 재진입 후 Fastboot 재감지 중... |",
+        "[Fastboot] bootloader 재진입 후 Fastboot 재감지 중... │",
     ));
 
     let _ = fastboot_reboot_bootloader();
@@ -322,7 +323,7 @@ where
     on_log("[Fastboot] 확인 완료".to_string());
     on_log(spinner_log(
         "fastboot_stabilize",
-        "[Fastboot] 안정화를 위해 5초 대기합니다... |",
+        "[Fastboot] 안정화를 위해 5초 대기합니다... │",
     ));
 
     thread::sleep(Duration::from_secs(5));
@@ -341,32 +342,35 @@ where
 {
     on_log(spinner_log(
         "reboot_device",
-        "[ADB/Fastboot] 기기를 재시작 합니다... |",
+        "[ADB] adb reboot 1회 실행 중... │",
     ));
 
-    let mut reboot_requested = false;
+    let adb_reboot_ok = adb_reboot_checked("system").is_ok();
 
-    if matches!(probe_adb_usb_state_once(), AdbUsbState::Ready) {
-        if adb_reboot_checked("system").is_ok() {
-            reboot_requested = true;
-        }
-    }
+    on_log(spinner_log(
+        "reboot_device",
+        if adb_reboot_ok {
+            "[ADB] adb reboot 1회 실행 완료"
+        } else {
+            "[ADB] adb reboot 1회 실행 실패, Fastboot 명령을 계속 시도합니다."
+        },
+    ));
 
-    if fastboot_has_device() && fastboot_reboot().is_ok() {
-        reboot_requested = true;
-    }
+    on_log(spinner_log(
+        "reboot_device",
+        "[Fastboot] fastboot reboot 1회 실행 중... │",
+    ));
 
-    if reboot_requested {
-        on_log(spinner_log(
-            "reboot_device",
-            "[ADB/Fastboot] 기기 재시작 요청 완료"
-        ));
-    } else {
-        on_log(spinner_log(
-            "reboot_device",
-            "[ADB/Fastboot] 기기 재시작 요청 실패"
-        ));
-    }
+    let fastboot_reboot_ok = fastboot_reboot().is_ok();
+
+    on_log(spinner_log(
+        "reboot_device",
+        if fastboot_reboot_ok {
+            "[Fastboot] fastboot reboot 1회 실행 완료"
+        } else {
+            "[Fastboot] fastboot reboot 1회 실행 실패, PreLoader 감지를 계속합니다."
+        },
+    ));
 }
 
 pub fn disable_ota_updates<F>(mut on_log: F) -> Result<()>
@@ -375,7 +379,7 @@ where
 {
     prepare_adb_usb_environment();
 
-    on_log(spinner_log("ota_adb_detect", "[OTA] USB ADB 기기 감지 중... |"));
+    on_log(spinner_log("ota_adb_detect", "[OTA] USB ADB 기기 감지 중... │"));
     on_log(ADB_UNAUTHORIZED_GUIDE.to_string());
     wait_for_adb_device_ready(&mut on_log)?;
     on_log(spinner_log("ota_adb_detect", "[OTA] USB ADB 기기 감지 완료"));
@@ -426,7 +430,7 @@ where
 {
     prepare_adb_usb_environment();
 
-    on_log(spinner_log("ota_adb_detect", "[OTA] USB ADB 기기 감지 중... |"));
+    on_log(spinner_log("ota_adb_detect", "[OTA] USB ADB 기기 감지 중... │"));
     on_log(ADB_UNAUTHORIZED_GUIDE.to_string());
     wait_for_adb_device_ready(&mut on_log)?;
     on_log(spinner_log("ota_adb_detect", "[OTA] USB ADB 기기 감지 완료"));
@@ -598,7 +602,7 @@ fn probe_adb_usb_state_once() -> AdbUsbState {
 }
 
 fn spinner_log(key: &str, message: &str) -> String {
-    format!("__SPINNER__|{key}|{message}")
+    format!("{INTERNAL_SPINNER_PREFIX}{key}|{message}")
 }
 
 fn adb_shell_checked(command: &str) -> Result<String> {
@@ -784,35 +788,6 @@ impl AdbManager {
         }
     }
 
-fn shell_bytes(&mut self, command: &str) -> Result<Vec<u8>> {
-    let device = self.connect_device()?;
-
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-
-    let result = device.shell_command(
-        &command,
-        Some(&mut stdout as &mut dyn Write),
-        Some(&mut stderr as &mut dyn Write),
-    );
-
-    match result {
-        Ok(_) => Ok(stdout),
-        Err(err) => {
-            self.drop_device();
-
-            let stderr_text = String::from_utf8_lossy(&stderr).trim().to_string();
-
-            if stderr_text.is_empty() {
-                Err(LpmError::Adb(format!("ADB shell 실패 `{command}`: {err}")))
-            } else {
-                Err(LpmError::Adb(format!(
-                    "ADB shell 실패 `{command}`: {err} / stderr={stderr_text}"
-                )))
-            }
-        }
-    }
-}
 
     fn reboot(&mut self, target: &str) -> Result<()> {
         let reboot_type = match target {
@@ -1130,7 +1105,7 @@ where
 {
     on_log(spinner_log(
         "fastboot_slot_a",
-        "[Fastboot] slot A 설정 중... |",
+        "[Fastboot] slot A 설정 중... │",
     ));
 
     NativeFastbootDevice::open().and_then(|mut device| device.set_active_a())?;
@@ -1239,22 +1214,6 @@ pub fn read_dashboard_device_info() -> Result<DashboardDeviceInfo> {
     })
 }
 
-pub fn capture_dashboard_screenshot_png() -> Result<Vec<u8>> {
-    let mut adb = AdbManager::new();
-
-    ensure_dashboard_adb_ready(&mut adb)?;
-
-    let bytes = adb.shell_bytes("screencap -p")?;
-    let bytes = normalize_screencap_png(bytes);
-
-    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Err(LpmError::Adb(
-            "ADB screencap 결과가 PNG 형식이 아닙니다.".to_string(),
-        ));
-    }
-
-    Ok(bytes)
-}
 
 fn ensure_dashboard_adb_ready(adb: &mut AdbManager) -> Result<()> {
     match adb.check_device_state()? {
@@ -1536,41 +1495,7 @@ fn extract_zui_version_segment(value: &str) -> Option<String> {
     None
 }
 
-fn normalize_screencap_png(bytes: Vec<u8>) -> Vec<u8> {
-    let mut bytes = if bytes.starts_with(b"\x89PNG\r\r\n") {
-        remove_shell_inserted_cr_before_lf(&bytes)
-    } else {
-        bytes
-    };
 
-    if let Some(start) = bytes
-        .windows(8)
-        .position(|window| window == b"\x89PNG\r\n\x1a\n")
-    {
-        if start > 0 {
-            bytes.drain(..start);
-        }
-    }
-
-    bytes
-}
-
-fn remove_shell_inserted_cr_before_lf(bytes: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut index = 0usize;
-
-    while index < bytes.len() {
-        if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') {
-            index += 1;
-            continue;
-        }
-
-        out.push(bytes[index]);
-        index += 1;
-    }
-
-    out
-}
 
 pub fn detect_preloader_once() -> PreloaderDetectResult {
     let checked_tokens = preloader_tokens();
@@ -1702,11 +1627,287 @@ fn clean_device_line(line: &str) -> String {
     trimmed.to_string()
 }
 
-const MTK_DRIVER_URL: &str = "https://media.mtkdriver.com/wp-content/uploads/MTK-Driver-v5.2307.zip";
+const MTK_DRIVER_URL: &str = "https://mtkdriver.com/wp-content/uploads/MTK-Driver-v5.1632.zip";
+const MTK_DRIVER_PACKAGE_DIR_NAME: &str = "MTK-Driver-v5.1632";
+const MTK_DRIVER_INSTALLER_FILE_NAME: &str = "MTK-Driver-Setup.exe";
+const MTK_DRIVER_REVISION_MARKER: &str = ".lpmbox_mtk_driver_v5.1632";
 #[cfg(windows)]
 const MTK_DRIVER_REGISTRY_KEY: &str = r"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\MediaTek SP Driver_is1";
 #[cfg(windows)]
 static MTK_DRIVER_PACKAGE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+const VC_REDIST_X86_URL: &str = "https://download.visualstudio.microsoft.com/download/pr/57eef8ae-a341-46c3-b0bc-c041027b54cd/F0BAB33A302B3CDB2E11113760D016F54FD3D2632C65BA7834FAC4F0ABD7F1A3/VC_redist.x86.exe";
+const VC_REDIST_X64_URL: &str = "https://download.visualstudio.microsoft.com/download/pr/ebdab8e5-1d7b-4d9f-a11b-cbb1720c3b12/843068991DAAA1F73AD9F6239BCE4D0F6A07A51F18C37EA2A867E9BECA71295C/VC_redist.x64.exe";
+#[cfg(windows)]
+const VC_RUNTIME_X86_REGISTRY_KEY: &str = r"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\{9a6ce18d-11c0-4452-aa35-9f2b8437c686}";
+#[cfg(windows)]
+const VC_RUNTIME_X64_REGISTRY_KEY: &str = r"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\{0e3bb569-69d6-4c34-bff9-c2f81db5e5f0}";
+#[cfg(windows)]
+static VC_RUNTIME_PACKAGE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VcRuntimeStatus {
+    pub x86_installed: bool,
+    pub x64_installed: bool,
+}
+
+impl VcRuntimeStatus {
+    pub fn all_installed(self) -> bool {
+        self.x86_installed && self.x64_installed
+    }
+}
+
+pub fn check_vc_runtime_installed() -> Result<VcRuntimeStatus> {
+    check_vc_runtime_installed_impl()
+}
+
+#[cfg(not(windows))]
+fn check_vc_runtime_installed_impl() -> Result<VcRuntimeStatus> {
+    Ok(VcRuntimeStatus {
+        x86_installed: true,
+        x64_installed: true,
+    })
+}
+
+#[cfg(windows)]
+fn check_vc_runtime_installed_impl() -> Result<VcRuntimeStatus> {
+    let x86_key = powershell_single_quote_escape(VC_RUNTIME_X86_REGISTRY_KEY);
+    let x64_key = powershell_single_quote_escape(VC_RUNTIME_X64_REGISTRY_KEY);
+    let script = format!(
+        r#"$ErrorActionPreference = 'SilentlyContinue'
+$roots = @(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+)
+$items = foreach ($root in $roots) {{ Get-ItemProperty -Path $root -ErrorAction SilentlyContinue }}
+function Test-LpmVcRegistry([string]$arch, [string]$exactKey) {{
+    if (Test-Path $exactKey) {{ return $true }}
+    foreach ($item in $items) {{
+        $name = [string]$item.DisplayName
+        $version = [string]$item.DisplayVersion
+        if ($name -match '(?i)^Microsoft Visual C\+\+' -and
+            $name -match "(?i)$arch" -and
+            $name -match '(?i)(Redistributable|Minimum Runtime|Additional Runtime)' -and
+            ($version -eq '' -or $version -match '^14\.')) {{
+            return $true
+        }}
+    }}
+    return $false
+}}
+$is64 = [Environment]::Is64BitOperatingSystem
+$x86DllDir = if ($is64) {{ Join-Path $env:WINDIR 'SysWOW64' }} else {{ Join-Path $env:WINDIR 'System32' }}
+$x64DllDir = if ($is64 -and -not [Environment]::Is64BitProcess) {{ Join-Path $env:WINDIR 'Sysnative' }} else {{ Join-Path $env:WINDIR 'System32' }}
+$x86Registry = Test-LpmVcRegistry 'x86' '{x86_key}'
+$x64Registry = if ($is64) {{ Test-LpmVcRegistry 'x64' '{x64_key}' }} else {{ $true }}
+$x86Dll = (Test-Path (Join-Path $x86DllDir 'VCRUNTIME140.dll')) -and (Test-Path (Join-Path $x86DllDir 'MSVCP140.dll'))
+$x64Dll = if ($is64) {{ (Test-Path (Join-Path $x64DllDir 'VCRUNTIME140.dll')) -and (Test-Path (Join-Path $x64DllDir 'MSVCP140.dll')) }} else {{ $true }}
+if ($x86Registry -and $x86Dll) {{ Write-Output 'LPMBOX_VC_X86_FOUND' }}
+if ($x64Registry -and $x64Dll) {{ Write-Output 'LPMBOX_VC_X64_FOUND' }}
+"#
+    );
+
+    let output = hidden_command_output(
+        "powershell",
+        &["-NoProfile", "-NonInteractive", "-Command", &script],
+    )
+    .ok_or_else(|| {
+        LpmError::InvalidFirmwareFolder(
+            "Microsoft Visual C++ 런타임 설치 여부 확인 명령을 실행하지 못했습니다."
+                .to_string(),
+        )
+    })?;
+
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+
+    Ok(VcRuntimeStatus {
+        x86_installed: text.contains("LPMBOX_VC_X86_FOUND"),
+        x64_installed: text.contains("LPMBOX_VC_X64_FOUND"),
+    })
+}
+
+pub fn install_vc_runtimes<F>(mut on_log: F) -> Result<()>
+where
+    F: FnMut(String),
+{
+    install_vc_runtimes_impl(&mut on_log)
+}
+
+#[cfg(not(windows))]
+fn install_vc_runtimes_impl<F>(on_log: &mut F) -> Result<()>
+where
+    F: FnMut(String),
+{
+    on_log(
+        "[Runtime] Microsoft Visual C++ 런타임 설치는 Windows에서만 지원됩니다."
+            .to_string(),
+    );
+    Err(LpmError::InvalidFirmwareFolder(
+        "Microsoft Visual C++ 런타임 설치는 Windows에서만 지원됩니다.".to_string(),
+    ))
+}
+
+#[cfg(windows)]
+fn install_vc_runtimes_impl<F>(on_log: &mut F) -> Result<()>
+where
+    F: FnMut(String),
+{
+    let lock = VC_RUNTIME_PACKAGE_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().map_err(|_| {
+        LpmError::InvalidFirmwareFolder(
+            "Microsoft Visual C++ 런타임 설치 잠금을 가져오지 못했습니다.".to_string(),
+        )
+    })?;
+
+    let initial = check_vc_runtime_installed_impl()?;
+    if initial.all_installed() {
+        on_log("[Runtime] Microsoft Visual C++ x86/x64 런타임이 이미 설치되어 있습니다.".to_string());
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(app_paths::tool_download_dir())?;
+    let mut restart_required = false;
+
+    if !initial.x86_installed {
+        let installer = app_paths::vc_redist_x86_path();
+        on_log("[Runtime] Microsoft Visual C++ x86 설치 파일을 다운로드 합니다.".to_string());
+        download_vc_redist(VC_REDIST_X86_URL, &installer)?;
+        on_log(format!(
+            "[Runtime] Microsoft Visual C++ x86 설치 파일을 실행합니다: {}",
+            installer.display()
+        ));
+        restart_required |= run_vc_redist_elevated(&installer)?;
+    }
+
+    let after_x86 = check_vc_runtime_installed_impl()?;
+
+    if !after_x86.x64_installed {
+        let installer = app_paths::vc_redist_x64_path();
+        on_log("[Runtime] Microsoft Visual C++ x64 설치 파일을 다운로드 합니다.".to_string());
+        download_vc_redist(VC_REDIST_X64_URL, &installer)?;
+        on_log(format!(
+            "[Runtime] Microsoft Visual C++ x64 설치 파일을 실행합니다: {}",
+            installer.display()
+        ));
+        restart_required |= run_vc_redist_elevated(&installer)?;
+    }
+
+    thread::sleep(Duration::from_millis(500));
+    let final_status = check_vc_runtime_installed_impl()?;
+
+    if !final_status.all_installed() {
+        let mut missing = Vec::new();
+        if !final_status.x86_installed {
+            missing.push("x86");
+        }
+        if !final_status.x64_installed {
+            missing.push("x64");
+        }
+
+        return Err(LpmError::InvalidFirmwareFolder(format!(
+            "Microsoft Visual C++ 런타임 설치 완료를 확인하지 못했습니다: {}. 설치 창을 완료한 뒤 다시 시도해주세요.",
+            missing.join(", ")
+        )));
+    }
+
+    on_log("[Runtime] Microsoft Visual C++ x86/x64 런타임 설치 감지 완료".to_string());
+
+    if restart_required {
+        on_log(
+            "[Runtime] Microsoft Visual C++ 런타임 설치가 완료되었습니다. Windows 재시작이 필요할 수 있습니다."
+                .to_string(),
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn download_vc_redist(url: &str, out_path: &Path) -> Result<()> {
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let part_path = out_path.with_file_name(format!(
+        "{}.part",
+        out_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("VC_redist.exe")
+    ));
+
+    if part_path.exists() {
+        std::fs::remove_file(&part_path)?;
+    }
+
+    let response = ureq::get(url)
+        .set("User-Agent", "Mozilla/5.0")
+        .call()
+        .map_err(|err| {
+            LpmError::InvalidFirmwareFolder(format!(
+                "Microsoft Visual C++ 런타임 다운로드 실패: {err}"
+            ))
+        })?;
+
+    if !(200..300).contains(&response.status()) {
+        return Err(LpmError::InvalidFirmwareFolder(format!(
+            "Microsoft Visual C++ 런타임 다운로드 HTTP 오류: {}",
+            response.status()
+        )));
+    }
+
+    let mut reader = response.into_reader();
+    let mut file = std::fs::File::create(&part_path)?;
+    std::io::copy(&mut reader, &mut file)?;
+    drop(file);
+
+    let size = std::fs::metadata(&part_path)?.len();
+    if size < 1024 * 1024 {
+        let _ = std::fs::remove_file(&part_path);
+        return Err(LpmError::InvalidFirmwareFolder(format!(
+            "Microsoft Visual C++ 런타임 설치 파일 크기가 올바르지 않습니다: {} bytes",
+            size
+        )));
+    }
+
+    let mut header = [0_u8; 2];
+    std::fs::File::open(&part_path)?.read_exact(&mut header)?;
+    if header != *b"MZ" {
+        let _ = std::fs::remove_file(&part_path);
+        return Err(LpmError::InvalidFirmwareFolder(
+            "Microsoft Visual C++ 런타임 설치 파일 형식이 올바르지 않습니다."
+                .to_string(),
+        ));
+    }
+
+    if out_path.exists() {
+        std::fs::remove_file(out_path)?;
+    }
+    std::fs::rename(&part_path, out_path)?;
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn run_vc_redist_elevated(path: &Path) -> Result<bool> {
+    let path_text = powershell_single_quote_escape(&path.to_string_lossy());
+    let script = format!(
+        "try {{ $p = Start-Process -FilePath '{path_text}' -ArgumentList @('/install','/passive','/norestart') -Verb RunAs -Wait -PassThru -ErrorAction Stop; if ($null -eq $p.ExitCode) {{ exit 1 }} else {{ exit $p.ExitCode }} }} catch {{ exit 1223 }}"
+    );
+
+    let output = hidden_powershell(&script)?;
+    match output.status.code().unwrap_or(-1) {
+        0 | 1638 => Ok(false),
+        1641 | 3010 => Ok(true),
+        1223 => Err(LpmError::InvalidFirmwareFolder(
+            "Microsoft Visual C++ 런타임 설치가 관리자 권한 확인 창에서 취소되었습니다."
+                .to_string(),
+        )),
+        other => Err(LpmError::InvalidFirmwareFolder(format!(
+            "Microsoft Visual C++ 런타임 설치 명령이 실패했습니다. exit_code={other}"
+        ))),
+    }
+}
 
 pub fn check_mtk_driver_installed() -> Result<bool> {
     check_mtk_driver_installed_impl()
@@ -1772,8 +1973,9 @@ where
 
     let driver_dir = app_paths::mtk_driver_dir();
     let zip_path = app_paths::mtk_driver_zip_path();
+    let revision_marker = driver_dir.join(MTK_DRIVER_REVISION_MARKER);
 
-    if find_mtk_driver_installer(&driver_dir).is_some() {
+    if revision_marker.is_file() && find_mtk_driver_installer(&driver_dir).is_some() {
         on_log(format!(
             "[Driver] MTK 드라이버 설치 파일 준비 완료: {}",
             driver_dir.display()
@@ -1804,13 +2006,15 @@ where
     ));
     extract_mtk_driver_zip_file(&zip_path, &driver_dir)?;
 
-    let installer = driver_dir.join("MTK Driver Setup.exe");
+    let installer = driver_dir.join(MTK_DRIVER_INSTALLER_FILE_NAME);
     if !installer.is_file() && find_mtk_driver_installer(&driver_dir).is_none() {
         return Err(LpmError::FileNotFound(format!(
             "MTK 드라이버 설치 파일을 찾지 못했습니다: {}",
             installer.display()
         )));
     }
+
+    std::fs::write(&revision_marker, b"5.1632")?;
 
     on_log(format!(
         "[Driver] MTK 드라이버 설치 파일 준비 완료: {}",
@@ -1847,7 +2051,7 @@ where
 
     prepare_mtk_driver_package_impl(on_log)?;
 
-    let installer = driver_dir.join("MTK Driver Setup.exe");
+    let installer = driver_dir.join(MTK_DRIVER_INSTALLER_FILE_NAME);
     let installer = if installer.is_file() {
         installer
     } else {
@@ -1966,7 +2170,7 @@ fn normalize_mtk_driver_zip_entry_path(path: &Path) -> PathBuf {
         if first
             .as_os_str()
             .to_string_lossy()
-            .eq_ignore_ascii_case("MTK-Driver-v5.2307")
+            .eq_ignore_ascii_case(MTK_DRIVER_PACKAGE_DIR_NAME)
             || first
                 .as_os_str()
                 .to_string_lossy()
@@ -1986,6 +2190,7 @@ fn find_mtk_driver_installer(root: &Path) -> Option<PathBuf> {
     collect_files_by_extension(root, "exe", &mut candidates);
 
     let preferred_names = [
+        MTK_DRIVER_INSTALLER_FILE_NAME,
         "MTK Driver Setup.exe",
         "DriverInstall.exe",
         "DriverInstaller.exe",
@@ -2057,34 +2262,6 @@ fn run_elevated_file(path: &Path) -> Result<()> {
 
     let output = hidden_powershell(&script)?;
     handle_elevated_exit(output.status.code().unwrap_or(-1))
-}
-
-#[cfg(windows)]
-#[allow(dead_code)]
-fn run_pnputil_install_elevated(driver_dir: &Path) -> Result<()> {
-    let temp_dir = std::env::temp_dir().join(format!("lpmbox_mtk_driver_{}", std::process::id()));
-    std::fs::create_dir_all(&temp_dir)?;
-
-    let script_path = temp_dir.join("install_mtk_driver.ps1");
-    let driver_dir_text = powershell_single_quote_escape(&driver_dir.to_string_lossy());
-
-    let script_body = format!(
-        "$ErrorActionPreference = 'Continue'\n$root = '{driver_dir_text}'\n$infs = Get-ChildItem -Path $root -Recurse -Filter *.inf\nif ($infs.Count -eq 0) {{ exit 2 }}\nforeach ($inf in $infs) {{ pnputil /add-driver $inf.FullName /install }}\nexit 0\n"
-    );
-
-    std::fs::write(&script_path, script_body)?;
-
-    let script_path_text = powershell_single_quote_escape(&script_path.to_string_lossy());
-    let script = format!(
-        "try {{ $p = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','{script_path_text}') -Verb RunAs -Wait -PassThru -ErrorAction Stop; if ($null -eq $p.ExitCode) {{ exit 1 }} else {{ exit $p.ExitCode }} }} catch {{ exit 1223 }}"
-    );
-
-    let output = hidden_powershell(&script)?;
-    let result = handle_elevated_exit(output.status.code().unwrap_or(-1));
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
-
-    result
 }
 
 #[cfg(windows)]

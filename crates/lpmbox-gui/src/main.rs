@@ -1,5 +1,4 @@
 #![windows_subsystem = "windows"]
-#![allow(dead_code)]
 
 use chrono::Local;
 use image as image_crate;
@@ -19,7 +18,7 @@ use std::time::{Duration, Instant};
 
 const WINDOW_WIDTH: f32 = 800.0;
 const WINDOW_HEIGHT: f32 = 600.0;
-const APP_DISPLAY_VERSION: &str = "3.1.0";
+const APP_DISPLAY_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const BODY_FONT: u32 = 15;
 const LOG_FONT: u32 = 12;
@@ -28,7 +27,6 @@ const APP_ICON_PNG_BYTES: &[u8] = include_bytes!("../assets/icon.png");
 const LPM_FONT_FAMILY: &str = "Malgun Gothic";
 const LPMBOX_RELEASES_URL: &str = "https://github.com/dwas-KR/LPMBox/releases";
 const LPMBOX_RELEASES_API_URL: &str = "https://api.github.com/repos/dwas-KR/LPMBox/releases?per_page=20";
-const LPMBOX_LANGUAGE_CONFIG_FILE: &str = "language.txt";
 const MODEL_TB375FC_IMAGE_BYTES: &[u8] = include_bytes!("../assets/models/TB375FC.png");
 const MODEL_TB365FC_IMAGE_BYTES: &[u8] = include_bytes!("../assets/models/TB365FC.png");
 const MODEL_TB335FC_IMAGE_BYTES: &[u8] = include_bytes!("../assets/models/TB335FC.png");
@@ -110,13 +108,6 @@ const SIDEBAR_EXPANDED_WIDTH: f32 = 210.0;
 const NAV_BTN_HEIGHT: f32 = 38.0;
 
 const LOG_WRAP_CHARS: usize = 86;
-#[allow(dead_code)]
-const ROM_CARD_HEIGHT: f32 = 360.0;
-#[allow(dead_code)]
-const ROM_CARD_WIDTH: f32 = 340.0;
-#[allow(dead_code)]
-const ROM_CARD_HANDLE_WIDTH: f32 = 26.0;
-const ROM_CARD_EXPAND_WIDTH: f32 = 300.0;
 
 const ROM_ROUTINE_CARD_WIDTH: f32 = 620.0;
 const ROM_ROUTINE_CARD_HEIGHT: f32 = 86.0;
@@ -126,33 +117,29 @@ const ROM_ROUTINE_HANDLE_RIGHT_PADDING: f32 = 0.0;
 const ROM_ROUTINE_EXPAND_WIDTH: f32 = 330.0;
 const ROM_ROUTINE_SLIDE_TEXT_WIDTH: f32 = 258.0;
 
-const ROM_OPTION_PANEL_WIDTH: f32 = 670.0;
-const ROM_OPTION_CARD_WIDTH: f32 = 590.0;
-const ROM_OPTION_CARD_HEIGHT: f32 = 280.0;
-const ROM_OPTION_RIGHT_WIDTH: f32 = 190.0;
 
 const ROM_HOVER_OPEN_DELAY_MS: u64 = 200;
-#[allow(dead_code)]
 const ROM_DIM_ALPHA: f32 = 0.50;
-const UI_SPINNER_FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
+const UI_SPINNER_FRAMES: [&str; 4] = ["│", "╱", "━", "╲"];
+const INTERNAL_SPINNER_PREFIX: &str = "\u{001e}LPMBOX_SPINNER\u{001f}";
 
 
 static ACTIVE_LANGUAGE_INDEX: AtomicU8 = AtomicU8::new(1);
 
 fn lpm_ui_display_text(content: String) -> String {
     if active_language_option() == LanguageOption::Arabic && !content.trim().is_empty() {
-        format!("\u{200E}{}\u{200E}", content)
+        format!("\u{2067}{}\u{2069}", content)
     } else {
         content
     }
 }
 
 fn iced_text<'a>(content: impl Into<String>) -> iced::widget::Text<'a> {
-    raw_iced_text(lpm_ui_display_text(content.into()))
+    raw_iced_text(lpm_ui_display_text(lpm_translate_owned(content.into())))
 }
 
 fn text<'a>(content: impl Into<String>) -> iced::widget::Text<'a> {
-    iced_text(lpm_translate_owned(content.into()))
+    iced_text(content)
 }
 
 fn active_language_option() -> LanguageOption {
@@ -164,7 +151,7 @@ fn set_active_language_option(language: LanguageOption) {
 }
 
 fn lpm_language_config_path() -> PathBuf {
-    lpmbox_core::app_paths::config_root().join(LPMBOX_LANGUAGE_CONFIG_FILE)
+    lpmbox_core::app_paths::language_config_path()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,11 +178,6 @@ fn load_saved_language_code() -> Option<String> {
         .filter(|code| !code.is_empty())
 }
 
-fn load_saved_language_option() -> Option<LanguageOption> {
-    load_saved_language_code()
-        .as_deref()
-        .and_then(LanguageOption::from_code)
-}
 
 fn save_language_option(language: LanguageOption) {
     let path = lpm_language_config_path();
@@ -205,11 +187,6 @@ fn save_language_option(language: LanguageOption) {
     let _ = std::fs::write(path, language.code());
 }
 
-fn detect_os_language_option() -> Option<LanguageOption> {
-    sys_locale::get_locale()
-        .as_deref()
-        .and_then(LanguageOption::from_locale)
-}
 
 fn resolve_initial_language_option(
     saved_code: Option<&str>,
@@ -233,9 +210,6 @@ fn initial_language_option_with_source() -> (LanguageOption, InitialLanguageSour
     resolve_initial_language_option(saved_code.as_deref(), os_locale.as_deref())
 }
 
-fn initial_language_option() -> LanguageOption {
-    initial_language_option_with_source().0
-}
 
 
 fn lpm_translate_en_ru_exact(lang: LanguageOption, key: &str) -> Option<&'static str> {
@@ -531,9 +505,30 @@ fn lpm_translate_en_ru_cleanup(lang: LanguageOption, content: String) -> String 
         }
         _ => {}
     }
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    normalize_localized_whitespace_preserving_lines(out)
 }
 
+fn normalize_localized_whitespace_preserving_lines(text: String) -> String {
+    text.lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn detach_spinner_frame_owned(content: String) -> (String, Option<&'static str>) {
+    let trimmed = content.trim_end();
+    for frame in UI_SPINNER_FRAMES {
+        if let Some(base) = trimmed.strip_suffix(frame) {
+            return (base.trim_end().to_string(), Some(frame));
+        }
+    }
+    for frame in ["|", "/", "-", "\\"] {
+        if let Some(base) = trimmed.strip_suffix(frame) {
+            return (base.trim_end().to_string(), Some(frame));
+        }
+    }
+    (content, None)
+}
 
 fn lpm_translate_exact_stage13(lang: LanguageOption, key: &str) -> Option<&'static str> {
     if lang.is_korean() {
@@ -1130,7 +1125,44 @@ fn lpm_stage11_label(lang: LanguageOption, key: &str) -> &'static str {
         "selected_program_language" => lpm_lang_text(lang, "Selected program language", "Выбран язык программы", "プログラム言語を選択しました", "已選擇程式語言", "Đã chọn ngôn ngữ chương trình", "Επιλέχθηκε γλώσσα προγράμματος", "प्रोग्राम भाषा चुनी गई", "პროგრამის ენა არჩეულია", "Programmataal geselecteerd", "تم اختيار لغة البرنامج", "Idioma del programa seleccionado"),
         "language_file_saved" => lpm_lang_text(lang, "Saved to language setting file", "Сохранено в файл настройки языка", "言語設定ファイルに保存しました", "已儲存到語言設定檔", "Đã lưu vào tệp cài đặt ngôn ngữ", "Αποθηκεύτηκε στο αρχείο ρύθμισης γλώσσας", "भाषा सेटिंग फ़ाइल में सहेजा गया", "შენახულია ენის პარამეტრის ფაილში", "Opgeslagen in taalinstellingenbestand", "تم الحفظ في ملف إعداد اللغة", "Guardado en el archivo de idioma"),
         "not_selected" => lpm_lang_text(lang, "Not selected", "Не выбрано", "未選択", "未選擇", "Chưa chọn", "Δεν επιλέχθηκε", "चयनित नहीं", "არ არის არჩეული", "Niet geselecteerd", "غير محدد", "No seleccionado"),
+        "scatter_xml" => lpm_lang_text(lang, "Scatter XML", "Scatter XML", "Scatter XML", "Scatter XML", "Scatter XML", "Scatter XML", "Scatter XML", "Scatter XML", "Scatter XML", "Scatter XML", "Scatter XML"),
+        "partition_list" => lpm_lang_text(lang, "Partition list", "Список разделов", "パーティション一覧", "分割區清單", "Danh sách phân vùng", "Λίστα διαμερισμάτων", "पार्टिशन सूची", "დანაყოფების სია", "Partitielijst", "قائمة الأقسام", "Lista de particiones"),
+        "partition_details" => lpm_lang_text(lang, "Partition details", "Сведения о разделах", "パーティション詳細", "分割區詳細資訊", "Chi tiết phân vùng", "Λεπτομέρειες διαμερισμάτων", "पार्टिशन विवरण", "დანაყოფების დეტალები", "Partitiedetails", "تفاصيل الأقسام", "Detalles de particiones"),
+        "required_partition_check" => lpm_lang_text(lang, "Required partition check", "Проверка обязательных разделов", "必須パーティション確認", "必要分割區檢查", "Kiểm tra phân vùng bắt buộc", "Έλεγχος απαιτούμενων διαμερισμάτων", "आवश्यक पार्टिशन जाँच", "აუცილებელი დანაყოფების შემოწმება", "Controle van vereiste partities", "فحص الأقسام المطلوبة", "Comprobación de particiones obligatorias"),
+        "required_partition_details" => lpm_lang_text(lang, "Required partition details", "Сведения об обязательных разделах", "必須パーティション詳細", "必要分割區詳細資訊", "Chi tiết phân vùng bắt buộc", "Λεπτομέρειες απαιτούμενων διαμερισμάτων", "आवश्यक पार्टिशन विवरण", "აუცილებელი დანაყოფების დეტალები", "Details van vereiste partities", "تفاصيل الأقسام المطلوبة", "Detalles de particiones obligatorias"),
+        "patch_plan_creation" => lpm_lang_text(lang, "Patch plan creation", "Создание плана исправлений", "パッチプラン作成", "建立修補計畫", "Tạo kế hoạch vá", "Δημιουργία σχεδίου ενημέρωσης", "पैच योजना बनाना", "ცვლილებების გეგმის შექმნა", "Patchplan maken", "إنشاء خطة التعديل", "Creación del plan de parches"),
+        "patch_plan_preview" => lpm_lang_text(lang, "Patch plan preview", "Предварительный просмотр плана исправлений", "パッチプランのプレビュー", "修補計畫預覽", "Xem trước kế hoạch vá", "Προεπισκόπηση σχεδίου ενημέρωσης", "पैच योजना पूर्वावलोकन", "ცვლილებების გეგმის წინასწარი ნახვა", "Voorbeeld van patchplan", "معاينة خطة التعديل", "Vista previa del plan de parches"),
+        "patch_plan_application" => lpm_lang_text(lang, "Patch plan application", "Применение плана исправлений", "パッチプラン適用", "套用修補計畫", "Áp dụng kế hoạch vá", "Εφαρμογή σχεδίου ενημέρωσης", "पैच योजना लागू करना", "ცვლილებების გეგმის გამოყენება", "Patchplan toepassen", "تطبيق خطة التعديل", "Aplicación del plan de parches"),
+        "patch_application_preview" => lpm_lang_text(lang, "Patch application preview", "Предварительный просмотр применения исправлений", "パッチ適用プレビュー", "修補套用預覽", "Xem trước việc áp dụng bản vá", "Προεπισκόπηση εφαρμογής ενημέρωσης", "पैच लागू करने का पूर्वावलोकन", "ცვლილებების გამოყენების წინასწარი ნახვა", "Voorbeeld van patchtoepassing", "معاينة تطبيق التعديل", "Vista previa de aplicación del parche"),
+        "patch_result_recheck" => lpm_lang_text(lang, "Patch result verification", "Повторная проверка результатов исправлений", "パッチ結果の再確認", "重新檢查修補結果", "Kiểm tra lại kết quả vá", "Επανέλεγχος αποτελεσμάτων ενημέρωσης", "पैच परिणाम की दोबारा जाँच", "ცვლილებების შედეგის ხელახალი შემოწმება", "Patchresultaat opnieuw controleren", "إعادة التحقق من نتيجة التعديل", "Nueva comprobación del resultado del parche"),
+        "patch_result_preview" => lpm_lang_text(lang, "Patch verification preview", "Сводка повторной проверки исправлений", "パッチ再確認の概要", "修補重新檢查摘要", "Tóm tắt kiểm tra lại bản vá", "Σύνοψη επανελέγχου ενημέρωσης", "पैच पुनः जाँच सारांश", "ცვლილებების ხელახალი შემოწმების შეჯამება", "Overzicht van patchcontrole", "ملخص إعادة التحقق من التعديل", "Resumen de la nueva comprobación del parche"),
+        "validation_warning" => lpm_lang_text(lang, "Validation warning", "Предупреждение проверки", "検証警告", "驗證警告", "Cảnh báo xác thực", "Προειδοποίηση επικύρωσης", "सत्यापन चेतावनी", "ვალიდაციის გაფრთხილება", "Validatiewaarschuwing", "تحذير التحقق", "Advertencia de validación"),
+        "settings_tag" => lpm_lang_text(lang, "Settings", "Настройки", "設定", "設定", "Cài đặt", "Ρυθμίσεις", "सेटिंग्स", "პარამეტრები", "Instellingen", "الإعدادات", "Configuración"),
+        "initial_language" => lpm_lang_text(lang, "Initial language", "Начальный язык", "初期言語", "初始語言", "Ngôn ngữ ban đầu", "Αρχική γλώσσα", "प्रारंभिक भाषा", "საწყისი ენა", "Begintaal", "اللغة الأولية", "Idioma inicial"),
+        "source" => lpm_lang_text(lang, "Source", "Источник", "基準", "依據", "Nguồn", "Πηγή", "स्रोत", "წყარო", "Bron", "المصدر", "Origen"),
+        "language_file_path" => lpm_lang_text(lang, "Language setting file path", "Путь к файлу настройки языка", "言語設定ファイルのパス", "語言設定檔路徑", "Đường dẫn tệp cài đặt ngôn ngữ", "Διαδρομή αρχείου ρύθμισης γλώσσας", "भाषा सेटिंग फ़ाइल पथ", "ენის პარამეტრის ფაილის ბილიკი", "Pad van taalinstellingenbestand", "مسار ملف إعداد اللغة", "Ruta del archivo de idioma"),
         _ => "",
+    }
+}
+
+fn lpm_localized_language_display_name(lang: LanguageOption, value: &str) -> String {
+    match value.trim() {
+        "한국어 (ko)" => lpm_lang_text(
+            lang,
+            "Korean (ko)",
+            "Корейский (ko)",
+            "韓国語 (ko)",
+            "韓文 (ko)",
+            "Tiếng Hàn (ko)",
+            "Κορεατικά (ko)",
+            "कोरियाई (ko)",
+            "კორეული (ko)",
+            "Koreaans (ko)",
+            "الكورية (ko)",
+            "Coreano (ko)",
+        )
+        .to_string(),
+        other => other.to_string(),
     }
 }
 
@@ -1162,56 +1194,101 @@ fn lpm_translate_dynamic_stage11(lang: LanguageOption, content: &str) -> Option<
     if let Some(rest) = text.strip_prefix("[Image] 플랫폼: ") {
         return Some(format!("[Image] {}: {rest}", lpm_stage11_label(lang, "platform")));
     }
-    if let Some(rest) = text.strip_prefix("block_firmware.ini 검사: ") {
+    if let Some(rest) = text.strip_prefix("온라인 차단 펌웨어 규칙 검사: ") {
         let converted = lpm_translate_stage11_final_cleanup(lang, rest.to_string());
-        return Some(format!("block_firmware.ini: {converted}"));
+        let label = lpm_lang_text(
+            lang,
+            "Online blocked-firmware rules",
+            "Онлайн-правила блокировки прошивок",
+            "オンラインのファームウェア遮断ルール",
+            "線上韌體封鎖規則",
+            "Quy tắc chặn firmware trực tuyến",
+            "Διαδικτυακοί κανόνες αποκλεισμού firmware",
+            "ऑनलाइन फर्मवेयर अवरोध नियम",
+            "Firmware-ის ონლაინ დაბლოკვის წესები",
+            "Online regels voor geblokkeerde firmware",
+            "قواعد حظر البرامج الثابتة عبر الإنترنت",
+            "Reglas en línea de bloqueo de firmware",
+        );
+        return Some(format!("{label}: {converted}"));
     }
     if let Some(rest) = text.strip_prefix("scatter XML 파싱: ") {
-        return Some(format!("scatter XML: {}", lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
+        return Some(format!("{}: {}", lpm_stage11_label(lang, "scatter_xml"), lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
     }
     if let Some(rest) = text.strip_prefix("partition 목록 읽기: ") {
-        return Some(format!("partition list: {}", lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
+        return Some(format!("{}: {}", lpm_stage11_label(lang, "partition_list"), lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
     }
     if let Some(rest) = text.strip_prefix("partition 상세 정보 읽기: ") {
-        return Some(format!("partition details: {}", lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
+        return Some(format!("{}: {}", lpm_stage11_label(lang, "partition_details"), lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
     }
     if let Some(rest) = text.strip_prefix("필수 partition 검사: ") {
-        return Some(format!("required partition check: {}", lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
+        return Some(format!("{}: {}", lpm_stage11_label(lang, "required_partition_check"), lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
     }
     if let Some(rest) = text.strip_prefix("필수 partition 상세: ") {
-        return Some(format!("required partition details: {}", lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
+        return Some(format!("{}: {}", lpm_stage11_label(lang, "required_partition_details"), lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
     }
     if let Some(rest) = text.strip_prefix("patch plan 생성: ") {
-        return Some(format!("patch plan creation: {}", lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
+        return Some(format!("{}: {}", lpm_stage11_label(lang, "patch_plan_creation"), lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
     }
     if let Some(rest) = text.strip_prefix("patch plan 미리보기: ") {
-        return Some(format!("patch plan preview: {}", lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
+        return Some(format!("{}: {}", lpm_stage11_label(lang, "patch_plan_preview"), lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
     }
     if let Some(rest) = text.strip_prefix("patch plan 적용: ") {
-        return Some(format!("patch plan application: {}", lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
+        return Some(format!("{}: {}", lpm_stage11_label(lang, "patch_plan_application"), lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
     }
     if let Some(rest) = text.strip_prefix("patch 적용 미리보기: ") {
-        return Some(format!("patch application preview: {}", lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
+        return Some(format!("{}: {}", lpm_stage11_label(lang, "patch_application_preview"), lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
     }
     if let Some(rest) = text.strip_prefix("patch 결과 재검증: ") {
-        return Some(format!("patch result recheck: {}", lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
+        return Some(format!("{}: {}", lpm_stage11_label(lang, "patch_result_recheck"), lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
     }
     if let Some(rest) = text.strip_prefix("patch 결과 재검증 미리보기: ") {
-        return Some(format!("patch result preview: {}", lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
+        return Some(format!("{}: {}", lpm_stage11_label(lang, "patch_result_preview"), lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
     }
     if let Some(rest) = text.strip_prefix("검증 경고 / ") {
-        return Some(format!("validation warning / {}", lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
+        return Some(format!("{} / {}", lpm_stage11_label(lang, "validation_warning"), lpm_translate_stage11_final_cleanup(lang, rest.to_string())));
     }
     if let Some(rest) = text.strip_prefix("[Log] 텍스트 파일을 ") {
         if let Some(path) = rest.strip_suffix("에 저장합니다.") {
             return Some(format!("[Log] {}: {path}", lpm_stage11_label(lang, "text_file_saved")));
         }
     }
+    if let Some(rest) = text.strip_prefix("[설정] 초기 언어 설정: ") {
+        if let Some((language, source)) = rest.split_once(" / 기준: ") {
+            let language = lpm_localized_language_display_name(lang, language);
+            let source = lpm_translate_exact_stage8(lang, source).unwrap_or(source);
+            return Some(format!(
+                "[{}] {}: {} / {}: {}",
+                lpm_stage11_label(lang, "settings_tag"),
+                lpm_stage11_label(lang, "initial_language"),
+                language,
+                lpm_stage11_label(lang, "source"),
+                source
+            ));
+        }
+    }
+    if let Some(rest) = text.strip_prefix("[설정] 언어 설정 파일 경로: ") {
+        return Some(format!(
+            "[{}] {}: {rest}",
+            lpm_stage11_label(lang, "settings_tag"),
+            lpm_stage11_label(lang, "language_file_path")
+        ));
+    }
     if let Some(rest) = text.strip_prefix("[설정] 프로그램 언어를 선택했습니다: ") {
-        return Some(format!("[Settings] {}: {rest}", lpm_stage11_label(lang, "selected_program_language")));
+        let language = lpm_localized_language_display_name(lang, rest);
+        return Some(format!(
+            "[{}] {}: {}",
+            lpm_stage11_label(lang, "settings_tag"),
+            lpm_stage11_label(lang, "selected_program_language"),
+            language
+        ));
     }
     if let Some(rest) = text.strip_prefix("[설정] 언어 설정 파일에 저장했습니다: ") {
-        return Some(format!("[Settings] {}: {rest}", lpm_stage11_label(lang, "language_file_saved")));
+        return Some(format!(
+            "[{}] {}: {rest}",
+            lpm_stage11_label(lang, "settings_tag"),
+            lpm_stage11_label(lang, "language_file_saved")
+        ));
     }
     if let Some(rest) = text.strip_prefix("선택한 국가 코드: ") {
         return Some(format!("{}: {}", lpm_translate_owned("선택한 국가 코드".to_string()), lpm_translate_owned(rest.to_string())));
@@ -1290,91 +1367,810 @@ fn lpm_stage11_cleanup_pairs(lang: LanguageOption) -> &'static [(&'static str, &
     }
 }
 
+fn lpm_translate_v312_runtime_message(lang: LanguageOption, text: &str) -> Option<String> {
+    if let Some(rest) = text.strip_prefix("[Image] 온라인 차단 펌웨어 규칙을 확인합니다: ") {
+        return Some(format!(
+            "[Image] {}: {rest}",
+            lpm_lang_text(
+                lang,
+                "Checking online blocked-firmware rules",
+                "Проверка онлайн-правил блокировки прошивок",
+                "オンラインのファームウェア遮断ルールを確認しています",
+                "正在檢查線上韌體封鎖規則",
+                "Đang kiểm tra quy tắc chặn firmware trực tuyến",
+                "Έλεγχος διαδικτυακών κανόνων αποκλεισμού firmware",
+                "ऑनलाइन फर्मवेयर अवरोध नियमों की जाँच",
+                "Firmware-ის ონლაინ დაბლოკვის წესების შემოწმება",
+                "Online regels voor geblokkeerde firmware controleren",
+                "جارٍ التحقق من قواعد حظر البرامج الثابتة عبر الإنترنت",
+                "Comprobando las reglas en línea de bloqueo de firmware",
+            )
+        ));
+    }
+
+    if let Some(rest) = text.strip_prefix("[Image] 온라인 차단 펌웨어 규칙 확인 완료: ") {
+        return Some(format!(
+            "[Image] {}: {rest}",
+            lpm_lang_text(
+                lang,
+                "Online blocked-firmware rules checked",
+                "Онлайн-правила блокировки прошивок проверены",
+                "オンラインのファームウェア遮断ルールを確認しました",
+                "線上韌體封鎖規則檢查完成",
+                "Đã kiểm tra quy tắc chặn firmware trực tuyến",
+                "Ο έλεγχος των διαδικτυακών κανόνων αποκλεισμού firmware ολοκληρώθηκε",
+                "ऑनलाइन फर्मवेयर अवरोध नियमों की जाँच पूरी हुई",
+                "Firmware-ის ონლაინ დაბლოკვის წესები შემოწმებულია",
+                "Online regels voor geblokkeerde firmware gecontroleerd",
+                "اكتمل التحقق من قواعد حظر البرامج الثابتة عبر الإنترنت",
+                "Reglas en línea de bloqueo de firmware comprobadas",
+            )
+        ));
+    }
+
+    if let Some(rest) = text.strip_prefix("온라인 차단 펌웨어 규칙 확인 실패: ") {
+        return Some(format!(
+            "{}: {}",
+            lpm_lang_text(
+                lang,
+                "Failed to check online blocked-firmware rules",
+                "Не удалось проверить онлайн-правила блокировки прошивок",
+                "オンラインのファームウェア遮断ルールを確認できませんでした",
+                "線上韌體封鎖規則檢查失敗",
+                "Không thể kiểm tra quy tắc chặn firmware trực tuyến",
+                "Αποτυχία ελέγχου των διαδικτυακών κανόνων αποκλεισμού firmware",
+                "ऑनलाइन फर्मवेयर अवरोध नियमों की जाँच विफल रही",
+                "Firmware-ის ონლაინ დაბლოკვის წესების შემოწმება ვერ მოხერხდა",
+                "Controleren van online regels voor geblokkeerde firmware mislukt",
+                "فشل التحقق من قواعد حظر البرامج الثابتة عبر الإنترنت",
+                "No se pudieron comprobar las reglas en línea de bloqueo de firmware",
+            ),
+            lpm_translate_v312_rule_error_detail(lang, rest)
+        ));
+    }
+
+    let translated = match text {
+        "[ADB] adb reboot 1회 실행 중..." => lpm_lang_text(
+            lang,
+            "[ADB] Running adb reboot once...",
+            "[ADB] Однократный запуск adb reboot...",
+            "[ADB] adb reboot を1回実行しています...",
+            "[ADB] 正在執行一次 adb reboot...",
+            "[ADB] Đang chạy adb reboot một lần...",
+            "[ADB] Εκτέλεση adb reboot μία φορά...",
+            "[ADB] adb reboot एक बार चलाया जा रहा है...",
+            "[ADB] adb reboot ერთხელ სრულდება...",
+            "[ADB] adb reboot één keer uitvoeren...",
+            "[ADB] جارٍ تنفيذ adb reboot مرة واحدة...",
+            "[ADB] Ejecutando adb reboot una vez...",
+        ),
+        "[ADB] adb reboot 1회 실행 완료" => lpm_lang_text(
+            lang,
+            "[ADB] adb reboot completed once",
+            "[ADB] adb reboot выполнен один раз",
+            "[ADB] adb reboot を1回実行しました",
+            "[ADB] adb reboot 已執行一次",
+            "[ADB] Đã chạy adb reboot một lần",
+            "[ADB] Το adb reboot εκτελέστηκε μία φορά",
+            "[ADB] adb reboot एक बार पूरा हुआ",
+            "[ADB] adb reboot ერთხელ დასრულდა",
+            "[ADB] adb reboot één keer voltooid",
+            "[ADB] اكتمل تنفيذ adb reboot مرة واحدة",
+            "[ADB] adb reboot se ejecutó una vez",
+        ),
+        "[ADB] adb reboot 1회 실행 실패, Fastboot 명령을 계속 시도합니다." => lpm_lang_text(
+            lang,
+            "[ADB] adb reboot failed; continuing with the Fastboot command.",
+            "[ADB] adb reboot не выполнен; продолжается попытка команды Fastboot.",
+            "[ADB] adb reboot に失敗したため、Fastboot コマンドを続けて試します。",
+            "[ADB] adb reboot 執行失敗，繼續嘗試 Fastboot 指令。",
+            "[ADB] adb reboot thất bại; tiếp tục thử lệnh Fastboot.",
+            "[ADB] Το adb reboot απέτυχε· συνεχίζεται η προσπάθεια με την εντολή Fastboot.",
+            "[ADB] adb reboot विफल रहा; Fastboot कमांड का प्रयास जारी है।",
+            "[ADB] adb reboot ვერ შესრულდა; Fastboot ბრძანების მცდელობა გრძელდება.",
+            "[ADB] adb reboot mislukt; de Fastboot-opdracht wordt verder geprobeerd.",
+            "[ADB] فشل adb reboot؛ ستستمر محاولة أمر Fastboot.",
+            "[ADB] adb reboot falló; se continuará con el comando Fastboot.",
+        ),
+        "[Fastboot] fastboot reboot 1회 실행 중..." => lpm_lang_text(
+            lang,
+            "[Fastboot] Running fastboot reboot once...",
+            "[Fastboot] Однократный запуск fastboot reboot...",
+            "[Fastboot] fastboot reboot を1回実行しています...",
+            "[Fastboot] 正在執行一次 fastboot reboot...",
+            "[Fastboot] Đang chạy fastboot reboot một lần...",
+            "[Fastboot] Εκτέλεση fastboot reboot μία φορά...",
+            "[Fastboot] fastboot reboot एक बार चलाया जा रहा है...",
+            "[Fastboot] fastboot reboot ერთხელ სრულდება...",
+            "[Fastboot] fastboot reboot één keer uitvoeren...",
+            "[Fastboot] جارٍ تنفيذ fastboot reboot مرة واحدة...",
+            "[Fastboot] Ejecutando fastboot reboot una vez...",
+        ),
+        "[Fastboot] fastboot reboot 1회 실행 완료" => lpm_lang_text(
+            lang,
+            "[Fastboot] fastboot reboot completed once",
+            "[Fastboot] fastboot reboot выполнен один раз",
+            "[Fastboot] fastboot reboot を1回実行しました",
+            "[Fastboot] fastboot reboot 已執行一次",
+            "[Fastboot] Đã chạy fastboot reboot một lần",
+            "[Fastboot] Το fastboot reboot εκτελέστηκε μία φορά",
+            "[Fastboot] fastboot reboot एक बार पूरा हुआ",
+            "[Fastboot] fastboot reboot ერთხელ დასრულდა",
+            "[Fastboot] fastboot reboot één keer voltooid",
+            "[Fastboot] اكتمل تنفيذ fastboot reboot مرة واحدة",
+            "[Fastboot] fastboot reboot se ejecutó una vez",
+        ),
+        "[Fastboot] fastboot reboot 1회 실행 실패, PreLoader 감지를 계속합니다." => lpm_lang_text(
+            lang,
+            "[Fastboot] fastboot reboot failed; continuing with PreLoader detection.",
+            "[Fastboot] fastboot reboot не выполнен; продолжается обнаружение PreLoader.",
+            "[Fastboot] fastboot reboot に失敗しました。PreLoader の検出を続行します。",
+            "[Fastboot] fastboot reboot 執行失敗，繼續偵測 PreLoader。",
+            "[Fastboot] fastboot reboot thất bại; tiếp tục phát hiện PreLoader.",
+            "[Fastboot] Το fastboot reboot απέτυχε· συνεχίζεται ο εντοπισμός PreLoader.",
+            "[Fastboot] fastboot reboot विफल रहा; PreLoader पहचान जारी है।",
+            "[Fastboot] fastboot reboot ვერ შესრულდა; PreLoader-ის აღმოჩენა გრძელდება.",
+            "[Fastboot] fastboot reboot mislukt; PreLoader-detectie gaat door.",
+            "[Fastboot] فشل fastboot reboot؛ سيستمر اكتشاف PreLoader.",
+            "[Fastboot] fastboot reboot falló; continuará la detección de PreLoader.",
+        ),
+        _ => return None,
+    };
+
+    Some(translated.to_string())
+}
+
+fn lpm_translate_v312_rule_error_detail(lang: LanguageOption, detail: &str) -> String {
+    let detail = detail
+        .strip_prefix("파일을 찾을 수 없습니다: ")
+        .unwrap_or(detail);
+
+    let mappings = [
+        (
+            "차단 펌웨어 규칙 확인 실패: ",
+            lpm_lang_text(lang, "Request failed", "Ошибка запроса", "要求に失敗しました", "要求失敗", "Yêu cầu thất bại", "Αποτυχία αιτήματος", "अनुरोध विफल", "მოთხოვნა ვერ შესრულდა", "Verzoek mislukt", "فشل الطلب", "La solicitud falló"),
+        ),
+        (
+            "차단 펌웨어 규칙 HTTP 상태 코드 오류: ",
+            lpm_lang_text(lang, "HTTP status error", "Ошибка статуса HTTP", "HTTP ステータスエラー", "HTTP 狀態錯誤", "Lỗi trạng thái HTTP", "Σφάλμα κατάστασης HTTP", "HTTP स्थिति त्रुटि", "HTTP სტატუსის შეცდომა", "HTTP-statusfout", "خطأ حالة HTTP", "Error de estado HTTP"),
+        ),
+        (
+            "차단 펌웨어 규칙 응답 읽기 실패: ",
+            lpm_lang_text(lang, "Failed to read the response", "Не удалось прочитать ответ", "応答を読み取れませんでした", "無法讀取回應", "Không thể đọc phản hồi", "Αποτυχία ανάγνωσης της απόκρισης", "प्रतिक्रिया पढ़ने में विफल", "პასუხის წაკითხვა ვერ მოხერხდა", "Lezen van antwoord mislukt", "فشل قراءة الاستجابة", "No se pudo leer la respuesta"),
+        ),
+    ];
+
+    for (prefix, label) in mappings {
+        if let Some(rest) = detail.strip_prefix(prefix) {
+            return format!("{label}: {rest}");
+        }
+    }
+
+    match detail {
+        "차단 펌웨어 규칙 응답이 비어 있습니다." => lpm_lang_text(lang, "The response is empty.", "Ответ пуст.", "応答が空です。", "回應內容為空。", "Phản hồi trống.", "Η απόκριση είναι κενή.", "प्रतिक्रिया खाली है।", "პასუხი ცარიელია.", "Het antwoord is leeg.", "الاستجابة فارغة.", "La respuesta está vacía.").to_string(),
+        "차단 펌웨어 규칙 대신 HTML 응답을 받았습니다." => lpm_lang_text(lang, "An HTML response was received instead of the rules.", "Вместо правил получен HTML-ответ.", "ルールの代わりに HTML 応答を受信しました。", "收到 HTML 回應，而非規則內容。", "Đã nhận phản hồi HTML thay vì nội dung quy tắc.", "Λήφθηκε απόκριση HTML αντί για τους κανόνες.", "नियमों के बजाय HTML प्रतिक्रिया मिली।", "წესების ნაცვლად მიღებულია HTML პასუხი.", "Er is een HTML-antwoord ontvangen in plaats van de regels.", "تم تلقي استجابة HTML بدلاً من القواعد.", "Se recibió una respuesta HTML en lugar de las reglas.").to_string(),
+        "차단 펌웨어 규칙에서 지원 모델 항목을 찾지 못했습니다." => lpm_lang_text(lang, "No supported-model entry was found in the rules.", "В правилах не найдена запись поддерживаемой модели.", "ルール内に対応モデルの項目が見つかりません。", "規則中找不到支援型號項目。", "Không tìm thấy mục model được hỗ trợ trong quy tắc.", "Δεν βρέθηκε καταχώριση υποστηριζόμενου μοντέλου στους κανόνες.", "नियमों में समर्थित मॉडल प्रविष्टि नहीं मिली।", "წესებში მხარდაჭერილი მოდელის ჩანაწერი ვერ მოიძებნა.", "Er is geen vermelding voor een ondersteund model gevonden.", "لم يتم العثور على إدخال لطراز مدعوم في القواعد.", "No se encontró una entrada de modelo compatible en las reglas.").to_string(),
+        "차단 펌웨어 규칙 메모리 잠금 실패" => lpm_lang_text(lang, "Failed to lock the in-memory rules.", "Не удалось заблокировать правила в памяти.", "メモリ内ルールのロックに失敗しました。", "無法鎖定記憶體中的規則。", "Không thể khóa quy tắc trong bộ nhớ.", "Αποτυχία κλειδώματος των κανόνων στη μνήμη.", "मेमोरी में नियम लॉक करने में विफल।", "მეხსიერებაში წესების დაბლოკვა ვერ მოხერხდა.", "Vergrendelen van de regels in het geheugen mislukt.", "فشل قفل القواعد في الذاكرة.", "No se pudieron bloquear las reglas en memoria.").to_string(),
+        _ => enforce_selected_language_output(lang, detail, detail.to_string()),
+    }
+}
+
+fn lpm_translate_known_runtime_log(lang: LanguageOption, text: &str) -> Option<String> {
+    if lang.is_korean() {
+        return None;
+    }
+
+    let exact = match text {
+        "선택한 image 폴더 정보 및 설치 환경 검사를 시작합니다." => Some(lpm_lang_text(lang, "Starting the selected image folder and installation environment check.", "Запуск проверки выбранной папки image и среды установки.", "選択したimageフォルダーとインストール環境の確認を開始します。", "開始檢查已選擇的 image 資料夾與安裝環境。", "Bắt đầu kiểm tra thư mục image đã chọn và môi trường cài đặt.", "Έναρξη ελέγχου του επιλεγμένου φακέλου image και του περιβάλλοντος εγκατάστασης.", "चयनित image फ़ोल्डर और इंस्टॉलेशन वातावरण की जाँच शुरू की जा रही है।", "არჩეული image საქაღალდისა და ინსტალაციის გარემოს შემოწმება იწყება.", "De controle van de geselecteerde image-map en installatieomgeving wordt gestart.", "بدء فحص مجلد image المحدد وبيئة التثبيت.", "Iniciando la comprobación de la carpeta image seleccionada y del entorno de instalación.")),
+        "펌웨어 검사 완료" => Some(lpm_lang_text(lang, "Firmware check completed", "Проверка прошивки завершена", "ファームウェアの確認が完了しました", "韌體檢查完成", "Đã kiểm tra firmware", "Ο έλεγχος firmware ολοκληρώθηκε", "फर्मवेयर जाँच पूरी हुई", "Firmware-ის შემოწმება დასრულდა", "Firmwarecontrole voltooid", "اكتمل فحص البرنامج الثابت", "Comprobación de firmware completada")),
+        "image 폴더 선택을 취소했습니다." => Some(lpm_lang_text(lang, "Image folder selection was cancelled.", "Выбор папки image отменён.", "imageフォルダーの選択をキャンセルしました。", "已取消選擇 image 資料夾。", "Đã hủy chọn thư mục image.", "Η επιλογή φακέλου image ακυρώθηκε.", "image फ़ोल्डर चयन रद्द कर दिया गया।", "image საქაღალდის არჩევა გაუქმდა.", "Selectie van de image-map is geannuleerd.", "تم إلغاء اختيار مجلد image.", "Se canceló la selección de la carpeta image.")),
+        "1번 옵션을 시작합니다: PRC/ROW 펌웨어 설치 [데이터 초기화]" => Some(lpm_lang_text(lang, "Starting option 1: PRC/ROW firmware installation [factory reset]", "Запуск варианта 1: установка прошивки PRC/ROW [сброс данных]", "オプション1を開始します：PRC/ROWファームウェアのインストール［データ初期化］", "開始選項 1：安裝 PRC/ROW 韌體［清除資料］", "Bắt đầu tùy chọn 1: cài firmware PRC/ROW [xóa dữ liệu]", "Έναρξη επιλογής 1: εγκατάσταση firmware PRC/ROW [επαναφορά δεδομένων]", "विकल्प 1 शुरू: PRC/ROW फर्मवेयर इंस्टॉल [डेटा रीसेट]", "იწყება ვარიანტი 1: PRC/ROW firmware-ის დაყენება [მონაცემების წაშლა]", "Optie 1 starten: PRC/ROW-firmware installeren [fabrieksreset]", "بدء الخيار 1: تثبيت برنامج PRC/ROW الثابت [إعادة ضبط البيانات]", "Iniciando la opción 1: instalación de firmware PRC/ROW [restablecer datos]")),
+        "2번 옵션을 시작합니다: ROW(글로벌) 펌웨어 업데이트 [데이터 유지]" => Some(lpm_lang_text(lang, "Starting option 2: ROW (Global ROM) firmware update [keep data]", "Запуск варианта 2: обновление прошивки ROW (глобальная ROM) [сохранение данных]", "オプション2を開始します：ROW（グローバルROM）ファームウェア更新［データ保持］", "開始選項 2：更新 ROW（全球版 ROM）韌體［保留資料］", "Bắt đầu tùy chọn 2: cập nhật firmware ROW (ROM toàn cầu) [giữ dữ liệu]", "Έναρξη επιλογής 2: ενημέρωση firmware ROW (Global ROM) [διατήρηση δεδομένων]", "विकल्प 2 शुरू: ROW (ग्लोबल ROM) फर्मवेयर अपडेट [डेटा रखें]", "იწყება ვარიანტი 2: ROW (გლობალური ROM) firmware-ის განახლება [მონაცემების შენარჩუნება]", "Optie 2 starten: ROW-firmware (Global ROM) bijwerken [gegevens behouden]", "بدء الخيار 2: تحديث برنامج ROW الثابت (الروم العالمي) [الاحتفاظ بالبيانات]", "Iniciando la opción 2: actualización de firmware ROW (ROM global) [conservar datos]")),
+        "3번 옵션을 시작합니다: 기기 복구 [데이터 초기화]" => Some(lpm_lang_text(lang, "Starting option 3: device recovery [factory reset]", "Запуск варианта 3: восстановление устройства [сброс данных]", "オプション3を開始します：デバイス復旧［データ初期化］", "開始選項 3：裝置修復［清除資料］", "Bắt đầu tùy chọn 3: khôi phục thiết bị [xóa dữ liệu]", "Έναρξη επιλογής 3: ανάκτηση συσκευής [επαναφορά δεδομένων]", "विकल्प 3 शुरू: डिवाइस रिकवरी [डेटा रीसेट]", "იწყება ვარიანტი 3: მოწყობილობის აღდგენა [მონაცემების წაშლა]", "Optie 3 starten: apparaatherstel [fabrieksreset]", "بدء الخيار 3: استرداد الجهاز [إعادة ضبط البيانات]", "Iniciando la opción 3: recuperación del dispositivo [restablecer datos]")),
+        "[1단계] ADB 기기 감지 및 기기 정보 확인" => Some(lpm_lang_text(lang, "[Step 1] Detecting the ADB device and checking device information", "[Шаг 1] Обнаружение устройства ADB и проверка сведений об устройстве", "[ステップ1] ADBデバイスを検出し、デバイス情報を確認", "[步驟 1] 偵測 ADB 裝置並檢查裝置資訊", "[Bước 1] Phát hiện thiết bị ADB và kiểm tra thông tin thiết bị", "[Βήμα 1] Εντοπισμός συσκευής ADB και έλεγχος πληροφοριών συσκευής", "[चरण 1] ADB डिवाइस पहचान और डिवाइस जानकारी की जाँच", "[ნაბიჯი 1] ADB მოწყობილობის აღმოჩენა და ინფორმაციის შემოწმება", "[Stap 1] ADB-apparaat detecteren en apparaatgegevens controleren", "[الخطوة 1] اكتشاف جهاز ADB والتحقق من معلومات الجهاز", "[Paso 1] Detectar el dispositivo ADB y comprobar la información del dispositivo")),
+        "[2단계] image 폴더 검사 및 플래싱 준비" => Some(lpm_lang_text(lang, "[Step 2] Checking the image folder and preparing to flash", "[Шаг 2] Проверка папки image и подготовка к прошивке", "[ステップ2] imageフォルダーを確認し、フラッシュの準備", "[步驟 2] 檢查 image 資料夾並準備刷寫", "[Bước 2] Kiểm tra thư mục image và chuẩn bị flash", "[Βήμα 2] Έλεγχος φακέλου image και προετοιμασία flash", "[चरण 2] image फ़ोल्डर जाँच और फ्लैश की तैयारी", "[ნაბიჯი 2] image საქაღალდის შემოწმება და ჩაწერის მომზადება", "[Stap 2] Image-map controleren en flash voorbereiden", "[الخطوة 2] فحص مجلد image والتحضير للتفليش", "[Paso 2] Comprobar la carpeta image y preparar el flasheo")),
+        "[2단계] image 폴더 기본 검사" => Some(lpm_lang_text(lang, "[Step 2] Basic image folder check", "[Шаг 2] Базовая проверка папки image", "[ステップ2] imageフォルダーの基本確認", "[步驟 2] image 資料夾基本檢查", "[Bước 2] Kiểm tra cơ bản thư mục image", "[Βήμα 2] Βασικός έλεγχος φακέλου image", "[चरण 2] image फ़ोल्डर की मूल जाँच", "[ნაბიჯი 2] image საქაღალდის ძირითადი შემოწმება", "[Stap 2] Basiscontrole van de image-map", "[الخطوة 2] الفحص الأساسي لمجلد image", "[Paso 2] Comprobación básica de la carpeta image")),
+        "[3단계] Flash Plan 준비 및 작업용 scatter/xml 생성" => Some(lpm_lang_text(lang, "[Step 3] Preparing the Flash Plan and generating the working scatter/XML files", "[Шаг 3] Подготовка Flash Plan и создание рабочих файлов scatter/XML", "[ステップ3] Flash Planを準備し、作業用scatter/XMLを生成", "[步驟 3] 準備 Flash Plan 並產生工作用 scatter/XML", "[Bước 3] Chuẩn bị Flash Plan và tạo scatter/XML làm việc", "[Βήμα 3] Προετοιμασία Flash Plan και δημιουργία αρχείων scatter/XML εργασίας", "[चरण 3] Flash Plan तैयार करना और कार्य scatter/XML बनाना", "[ნაბიჯი 3] Flash Plan-ის მომზადება და სამუშაო scatter/XML-ის შექმნა", "[Stap 3] Flash Plan voorbereiden en werk-scatter/XML genereren", "[الخطوة 3] إعداد Flash Plan وإنشاء ملفات scatter/XML للعمل", "[Paso 3] Preparar el Flash Plan y generar scatter/XML de trabajo")),
+        "[4단계] current slot A 설정" => Some(lpm_lang_text(lang, "[Step 4] Setting current slot A", "[Шаг 4] Настройка текущего слота A", "[ステップ4] current slotをAに設定", "[步驟 4] 將目前 slot 設為 A", "[Bước 4] Đặt current slot thành A", "[Βήμα 4] Ρύθμιση του current slot σε A", "[चरण 4] current slot को A पर सेट करना", "[ნაბიჯი 4] current slot-ის A-ზე დაყენება", "[Stap 4] Current slot instellen op A", "[الخطوة 4] تعيين current slot إلى A", "[Paso 4] Establecer current slot en A")),
+        "[5단계] ROM 설치" => Some(lpm_lang_text(lang, "[Step 5] Installing the ROM", "[Шаг 5] Установка ROM", "[ステップ5] ROMをインストール", "[步驟 5] 安裝 ROM", "[Bước 5] Cài đặt ROM", "[Βήμα 5] Εγκατάσταση ROM", "[चरण 5] ROM इंस्टॉल", "[ნაბიჯი 5] ROM-ის დაყენება", "[Stap 5] ROM installeren", "[الخطوة 5] تثبيت ROM", "[Paso 5] Instalar la ROM")),
+        "[6단계] MediaTek PreLoader 포트 감지" => Some(lpm_lang_text(lang, "[Step 6] Detecting the MediaTek PreLoader port", "[Шаг 6] Обнаружение порта MediaTek PreLoader", "[ステップ6] MediaTek PreLoaderポートを検出", "[步驟 6] 偵測 MediaTek PreLoader 連接埠", "[Bước 6] Phát hiện cổng MediaTek PreLoader", "[Βήμα 6] Εντοπισμός θύρας MediaTek PreLoader", "[चरण 6] MediaTek PreLoader पोर्ट पहचान", "[ნაბიჯი 6] MediaTek PreLoader პორტის აღმოჩენა", "[Stap 6] MediaTek PreLoader-poort detecteren", "[الخطوة 6] اكتشاف منفذ MediaTek PreLoader", "[Paso 6] Detectar el puerto MediaTek PreLoader")),
+        "[7단계] SPFlashToolV6 ROM 설치" => Some(lpm_lang_text(lang, "[Step 7] Installing the ROM with SPFlashToolV6", "[Шаг 7] Установка ROM с помощью SPFlashToolV6", "[ステップ7] SPFlashToolV6でROMをインストール", "[步驟 7] 使用 SPFlashToolV6 安裝 ROM", "[Bước 7] Cài ROM bằng SPFlashToolV6", "[Βήμα 7] Εγκατάσταση ROM με το SPFlashToolV6", "[चरण 7] SPFlashToolV6 से ROM इंस्टॉल", "[ნაბიჯი 7] ROM-ის დაყენება SPFlashToolV6-ით", "[Stap 7] ROM installeren met SPFlashToolV6", "[الخطوة 7] تثبيت ROM باستخدام SPFlashToolV6", "[Paso 7] Instalar la ROM con SPFlashToolV6")),
+        "[완료] 1번 옵션 PRC/ROW 펌웨어 설치 작업이 완료되었습니다." => Some(lpm_lang_text(lang, "[Completed] Option 1 PRC/ROW firmware installation is complete.", "[Завершено] Установка прошивки PRC/ROW по варианту 1 завершена.", "[完了] オプション1のPRC/ROWファームウェアインストールが完了しました。", "[完成] 選項 1 的 PRC/ROW 韌體安裝已完成。", "[Hoàn tất] Đã hoàn tất cài firmware PRC/ROW theo tùy chọn 1.", "[Ολοκληρώθηκε] Η εγκατάσταση firmware PRC/ROW της επιλογής 1 ολοκληρώθηκε.", "[पूर्ण] विकल्प 1 का PRC/ROW फर्मवेयर इंस्टॉल पूरा हुआ।", "[დასრულდა] ვარიანტი 1-ის PRC/ROW firmware-ის დაყენება დასრულდა.", "[Voltooid] Optie 1 PRC/ROW-firmware-installatie is voltooid.", "[اكتمل] اكتمل تثبيت برنامج PRC/ROW الثابت للخيار 1.", "[Completado] Finalizó la instalación de firmware PRC/ROW de la opción 1.")),
+        "[완료] 2번 옵션 ROW(글로벌) 펌웨어 업데이트 [데이터 유지] 작업이 완료되었습니다." => Some(lpm_lang_text(lang, "[Completed] Option 2 ROW firmware update [keep data] is complete.", "[Завершено] Обновление прошивки ROW по варианту 2 [сохранение данных] завершено.", "[完了] オプション2のROWファームウェア更新［データ保持］が完了しました。", "[完成] 選項 2 的 ROW 韌體更新［保留資料］已完成。", "[Hoàn tất] Đã hoàn tất cập nhật firmware ROW theo tùy chọn 2 [giữ dữ liệu].", "[Ολοκληρώθηκε] Η ενημέρωση firmware ROW της επιλογής 2 [διατήρηση δεδομένων] ολοκληρώθηκε.", "[पूर्ण] विकल्प 2 का ROW फर्मवेयर अपडेट [डेटा रखें] पूरा हुआ।", "[დასრულდა] ვარიანტი 2-ის ROW firmware-ის განახლება [მონაცემების შენარჩუნება] დასრულდა.", "[Voltooid] Optie 2 ROW-firmware-update [gegevens behouden] is voltooid.", "[اكتمل] اكتمل تحديث برنامج ROW الثابت للخيار 2 [الاحتفاظ بالبيانات].", "[Completado] Finalizó la actualización de firmware ROW de la opción 2 [conservar datos].")),
+        "[완료] 기기 복구 [데이터 초기화] 작업이 완료되었습니다." => Some(lpm_lang_text(lang, "[Completed] Device recovery [factory reset] is complete.", "[Завершено] Восстановление устройства [сброс данных] завершено.", "[完了] デバイス復旧［データ初期化］が完了しました。", "[完成] 裝置修復［清除資料］已完成。", "[Hoàn tất] Đã hoàn tất khôi phục thiết bị [xóa dữ liệu].", "[Ολοκληρώθηκε] Η ανάκτηση συσκευής [επαναφορά δεδομένων] ολοκληρώθηκε.", "[पूर्ण] डिवाइस रिकवरी [डेटा रीसेट] पूरी हुई।", "[დასრულდა] მოწყობილობის აღდგენა [მონაცემების წაშლა] დასრულდა.", "[Voltooid] Apparaatherstel [fabrieksreset] is voltooid.", "[اكتمل] اكتمل استرداد الجهاز [إعادة ضبط البيانات].", "[Completado] Finalizó la recuperación del dispositivo [restablecer datos].")),
+        "재설치 모드는 current slot 단계 없이 PreLoader/SPFlashToolV6 단계로 바로 진행합니다." => Some(lpm_lang_text(lang, "Recovery mode proceeds directly to PreLoader/SPFlashToolV6 without the current-slot stage.", "Режим восстановления сразу переходит к PreLoader/SPFlashToolV6 без этапа current slot.", "復旧モードではcurrent slotの手順を省略し、PreLoader/SPFlashToolV6へ直接進みます。", "修復模式會略過 current slot 步驟，直接進入 PreLoader/SPFlashToolV6。", "Chế độ khôi phục chuyển thẳng đến PreLoader/SPFlashToolV6 mà không qua bước current slot.", "Η λειτουργία ανάκτησης προχωρά απευθείας στο PreLoader/SPFlashToolV6 χωρίς το στάδιο current slot.", "रिकवरी मोड current slot चरण के बिना सीधे PreLoader/SPFlashToolV6 पर जाता है।", "აღდგენის რეჟიმი current slot ეტაპის გარეშე პირდაპირ PreLoader/SPFlashToolV6-ზე გადადის.", "De herstelmodus gaat zonder current-slotstap rechtstreeks naar PreLoader/SPFlashToolV6.", "ينتقل وضع الاسترداد مباشرةً إلى PreLoader/SPFlashToolV6 دون مرحلة current slot.", "El modo de recuperación pasa directamente a PreLoader/SPFlashToolV6 sin la etapa current slot.")),
+        "[ADB] 기기 감지" | "[ADB] 기기를 감지하고 있습니다..." => Some(lpm_lang_text(lang, "[ADB] Detecting the device...", "[ADB] Обнаружение устройства...", "[ADB] デバイスを検出しています...", "[ADB] 正在偵測裝置...", "[ADB] Đang phát hiện thiết bị...", "[ADB] Εντοπισμός συσκευής...", "[ADB] डिवाइस पहचाना जा रहा है...", "[ADB] მოწყობილობის აღმოჩენა...", "[ADB] Apparaat detecteren...", "[ADB] جارٍ اكتشاف الجهاز...", "[ADB] Detectando el dispositivo...")),
+        "[ADB] 기기 감지 완료" => Some(lpm_lang_text(lang, "[ADB] Device detected", "[ADB] Устройство обнаружено", "[ADB] デバイスを検出しました", "[ADB] 已偵測到裝置", "[ADB] Đã phát hiện thiết bị", "[ADB] Η συσκευή εντοπίστηκε", "[ADB] डिवाइस मिल गया", "[ADB] მოწყობილობა აღმოჩენილია", "[ADB] Apparaat gedetecteerd", "[ADB] تم اكتشاف الجهاز", "[ADB] Dispositivo detectado")),
+        "[ADB] ADB 명령어로 Slot 설정 중..." => Some(lpm_lang_text(lang, "[ADB] Setting the slot with an ADB command...", "[ADB] Настройка slot командой ADB...", "[ADB] ADBコマンドでslotを設定しています...", "[ADB] 正在使用 ADB 指令設定 slot...", "[ADB] Đang đặt slot bằng lệnh ADB...", "[ADB] Ρύθμιση slot με εντολή ADB...", "[ADB] ADB कमांड से slot सेट किया जा रहा है...", "[ADB] slot-ის დაყენება ADB ბრძანებით...", "[ADB] Slot instellen met een ADB-opdracht...", "[ADB] جارٍ تعيين slot باستخدام أمر ADB...", "[ADB] Configurando el slot con un comando ADB...")),
+        "[ADB] ADB 명령어로 Slot 설정 완료" => Some(lpm_lang_text(lang, "[ADB] Slot setting with ADB completed", "[ADB] Настройка slot через ADB завершена", "[ADB] ADBによるslot設定が完了しました", "[ADB] 已完成使用 ADB 設定 slot", "[ADB] Đã đặt slot bằng ADB", "[ADB] Η ρύθμιση slot μέσω ADB ολοκληρώθηκε", "[ADB] ADB से slot सेट हो गया", "[ADB] slot-ის ADB-ით დაყენება დასრულდა", "[ADB] Slot instellen via ADB voltooid", "[ADB] اكتمل تعيين slot عبر ADB", "[ADB] Configuración del slot mediante ADB completada")),
+        "[ADB] bootloader 모드 설정" => Some(lpm_lang_text(lang, "[ADB] Switching to bootloader mode", "[ADB] Переход в режим bootloader", "[ADB] bootloaderモードへ切り替え", "[ADB] 切換至 bootloader 模式", "[ADB] Chuyển sang chế độ bootloader", "[ADB] Μετάβαση σε λειτουργία bootloader", "[ADB] bootloader मोड पर स्विच", "[ADB] bootloader რეჟიმზე გადასვლა", "[ADB] Overschakelen naar bootloader-modus", "[ADB] التبديل إلى وضع bootloader", "[ADB] Cambiando al modo bootloader")),
+        "[Fastboot] 기기 감지중..." => Some(lpm_lang_text(lang, "[Fastboot] Detecting the device...", "[Fastboot] Обнаружение устройства...", "[Fastboot] デバイスを検出しています...", "[Fastboot] 正在偵測裝置...", "[Fastboot] Đang phát hiện thiết bị...", "[Fastboot] Εντοπισμός συσκευής...", "[Fastboot] डिवाइस पहचाना जा रहा है...", "[Fastboot] მოწყობილობის აღმოჩენა...", "[Fastboot] Apparaat detecteren...", "[Fastboot] جارٍ اكتشاف الجهاز...", "[Fastboot] Detectando el dispositivo...")),
+        "[Fastboot] 기기 감지 완료" => Some(lpm_lang_text(lang, "[Fastboot] Device detected", "[Fastboot] Устройство обнаружено", "[Fastboot] デバイスを検出しました", "[Fastboot] 已偵測到裝置", "[Fastboot] Đã phát hiện thiết bị", "[Fastboot] Η συσκευή εντοπίστηκε", "[Fastboot] डिवाइस मिल गया", "[Fastboot] მოწყობილობა აღმოჩენილია", "[Fastboot] Apparaat gedetecteerd", "[Fastboot] تم اكتشاف الجهاز", "[Fastboot] Dispositivo detectado")),
+        "[Fastboot] bootloader 재진입 후 Fastboot 재감지 중..." => Some(lpm_lang_text(lang, "[Fastboot] Re-entering bootloader and detecting Fastboot again...", "[Fastboot] Повторный вход в bootloader и обнаружение Fastboot...", "[Fastboot] bootloaderへ再移行し、Fastbootを再検出しています...", "[Fastboot] 重新進入 bootloader 並再次偵測 Fastboot...", "[Fastboot] Vào lại bootloader và phát hiện lại Fastboot...", "[Fastboot] Επανείσοδος στο bootloader και νέος εντοπισμός Fastboot...", "[Fastboot] bootloader में फिर प्रवेश करके Fastboot दोबारा पहचाना जा रहा है...", "[Fastboot] bootloader-ში ხელახლა შესვლა და Fastboot-ის ხელახალი აღმოჩენა...", "[Fastboot] Bootloader opnieuw openen en Fastboot opnieuw detecteren...", "[Fastboot] إعادة الدخول إلى bootloader واكتشاف Fastboot مجددًا...", "[Fastboot] Volviendo a entrar en bootloader y detectando Fastboot de nuevo...")),
+        "[Fastboot] bootloader 재진입 후 Fastboot 재감지 완료" => Some(lpm_lang_text(lang, "[Fastboot] Fastboot detected after re-entering bootloader", "[Fastboot] Fastboot обнаружен после повторного входа в bootloader", "[Fastboot] bootloader再移行後のFastboot検出が完了しました", "[Fastboot] 重新進入 bootloader 後已偵測到 Fastboot", "[Fastboot] Đã phát hiện Fastboot sau khi vào lại bootloader", "[Fastboot] Το Fastboot εντοπίστηκε μετά την επανείσοδο στο bootloader", "[Fastboot] bootloader में फिर प्रवेश के बाद Fastboot मिल गया", "[Fastboot] bootloader-ში ხელახლა შესვლის შემდეგ Fastboot აღმოჩენილია", "[Fastboot] Fastboot gedetecteerd na opnieuw openen van bootloader", "[Fastboot] تم اكتشاف Fastboot بعد إعادة الدخول إلى bootloader", "[Fastboot] Fastboot detectado tras volver a entrar en bootloader")),
+        "[Fastboot] 확인 완료" => Some(lpm_lang_text(lang, "[Fastboot] Verification completed", "[Fastboot] Проверка завершена", "[Fastboot] 確認が完了しました", "[Fastboot] 驗證完成", "[Fastboot] Đã xác minh", "[Fastboot] Η επαλήθευση ολοκληρώθηκε", "[Fastboot] सत्यापन पूरा हुआ", "[Fastboot] შემოწმება დასრულდა", "[Fastboot] Verificatie voltooid", "[Fastboot] اكتمل التحقق", "[Fastboot] Verificación completada")),
+        "[Fastboot] 안정화를 위해 5초 대기합니다..." => Some(lpm_lang_text(lang, "[Fastboot] Waiting 5 seconds for stabilization...", "[Fastboot] Ожидание 5 секунд для стабилизации...", "[Fastboot] 安定化のため5秒待機しています...", "[Fastboot] 等待 5 秒以穩定連線...", "[Fastboot] Chờ 5 giây để ổn định...", "[Fastboot] Αναμονή 5 δευτερολέπτων για σταθεροποίηση...", "[Fastboot] स्थिरता के लिए 5 सेकंड प्रतीक्षा...", "[Fastboot] სტაბილიზაციისთვის 5 წამით მოცდა...", "[Fastboot] 5 seconden wachten op stabilisatie...", "[Fastboot] الانتظار 5 ثوانٍ للاستقرار...", "[Fastboot] Esperando 5 segundos para estabilizar...")),
+        "[Fastboot] 안정화 대기 완료" => Some(lpm_lang_text(lang, "[Fastboot] Stabilization wait completed", "[Fastboot] Ожидание стабилизации завершено", "[Fastboot] 安定化待機が完了しました", "[Fastboot] 穩定等待完成", "[Fastboot] Đã chờ ổn định", "[Fastboot] Η αναμονή σταθεροποίησης ολοκληρώθηκε", "[Fastboot] स्थिरता प्रतीक्षा पूरी हुई", "[Fastboot] სტაბილიზაციის მოლოდინი დასრულდა", "[Fastboot] Wachten op stabilisatie voltooid", "[Fastboot] اكتمل انتظار الاستقرار", "[Fastboot] Espera de estabilización completada")),
+        "[Fastboot] slot A 설정 중..." => Some(lpm_lang_text(lang, "[Fastboot] Setting slot A...", "[Fastboot] Настройка slot A...", "[Fastboot] slot Aを設定しています...", "[Fastboot] 正在設定 slot A...", "[Fastboot] Đang đặt slot A...", "[Fastboot] Ρύθμιση slot A...", "[Fastboot] slot A सेट किया जा रहा है...", "[Fastboot] slot A-ის დაყენება...", "[Fastboot] Slot A instellen...", "[Fastboot] جارٍ تعيين slot A...", "[Fastboot] Configurando slot A...")),
+        "[Fastboot] slot A 설정 완료" => Some(lpm_lang_text(lang, "[Fastboot] Slot A setting completed", "[Fastboot] Настройка slot A завершена", "[Fastboot] slot Aの設定が完了しました", "[Fastboot] slot A 設定完成", "[Fastboot] Đã đặt slot A", "[Fastboot] Η ρύθμιση slot A ολοκληρώθηκε", "[Fastboot] slot A सेट हो गया", "[Fastboot] slot A-ის დაყენება დასრულდა", "[Fastboot] Slot A instellen voltooid", "[Fastboot] اكتمل تعيين slot A", "[Fastboot] Configuración de slot A completada")),
+        "[Port] PreLoader 포트 감지 중..." => Some(lpm_lang_text(lang, "[Port] Detecting the PreLoader port...", "[Порт] Обнаружение порта PreLoader...", "[ポート] PreLoaderポートを検出しています...", "[連接埠] 正在偵測 PreLoader 連接埠...", "[Cổng] Đang phát hiện cổng PreLoader...", "[Θύρα] Εντοπισμός θύρας PreLoader...", "[पोर्ट] PreLoader पोर्ट पहचाना जा रहा है...", "[პორტი] PreLoader პორტის აღმოჩენა...", "[Poort] PreLoader-poort detecteren...", "[المنفذ] جارٍ اكتشاف منفذ PreLoader...", "[Puerto] Detectando el puerto PreLoader...")),
+        "[Port] PreLoader 포트 감지 완료" => Some(lpm_lang_text(lang, "[Port] PreLoader port detected", "[Порт] Порт PreLoader обнаружен", "[ポート] PreLoaderポートを検出しました", "[連接埠] 已偵測到 PreLoader 連接埠", "[Cổng] Đã phát hiện cổng PreLoader", "[Θύρα] Η θύρα PreLoader εντοπίστηκε", "[पोर्ट] PreLoader पोर्ट मिल गया", "[პორტი] PreLoader პორტი აღმოჩენილია", "[Poort] PreLoader-poort gedetecteerd", "[المنفذ] تم اكتشاف منفذ PreLoader", "[Puerto] Puerto PreLoader detectado")),
+        "[안내] PC(노트북)와 연결한 태블릿에 잠금 해제 → 메세지 창 왼쪽 중간 체크 박스 체크 → 오른쪽 하단 Allow(허용)를 터치해주세요." => Some(lpm_lang_text(lang, "[Guide] Unlock the tablet connected to the PC, select the checkbox in the authorization dialog, and tap Allow.", "[Инструкция] Разблокируйте планшет, подключённый к ПК, установите флажок в окне авторизации и нажмите Allow.", "[案内] PCに接続したタブレットのロックを解除し、認証画面のチェックボックスを選択して［Allow］をタップしてください。", "[說明] 解鎖已連接電腦的平板，在授權視窗勾選核取方塊，然後點選 Allow。", "[Hướng dẫn] Mở khóa máy tính bảng đã kết nối với PC, chọn ô trong hộp thoại cấp quyền rồi nhấn Allow.", "[Οδηγίες] Ξεκλειδώστε το tablet που είναι συνδεδεμένο στον υπολογιστή, επιλέξτε το πλαίσιο στο παράθυρο εξουσιοδότησης και πατήστε Allow.", "[निर्देश] PC से जुड़े टैबलेट को अनलॉक करें, अनुमति संवाद में चेकबॉक्स चुनें और Allow दबाएँ।", "[მითითება] განბლოკეთ PC-სთან დაკავშირებული ტაბლეტი, ავტორიზაციის ფანჯარაში მონიშნეთ ველი და დააჭირეთ Allow-ს.", "[Instructie] Ontgrendel de tablet die met de pc is verbonden, vink het selectievakje in het toestemmingsvenster aan en tik op Allow.", "[إرشاد] افتح قفل الجهاز اللوحي المتصل بالكمبيوتر، وحدد مربع الاختيار في نافذة التفويض، ثم اضغط على Allow.", "[Guía] Desbloquee la tablet conectada al PC, marque la casilla del cuadro de autorización y pulse Allow.")),
+        _ => None,
+    };
+
+    if let Some(value) = exact {
+        return Some(value.to_string());
+    }
+
+    if text == "!" {
+        return Some("!".to_string());
+    }
+
+    if let Some(rest) = text.strip_prefix("차단 버전 목록 / ") {
+        return Some(format!(
+            "{}{rest}",
+            lpm_lang_text(
+                lang,
+                "Blocked firmware versions / ",
+                "Заблокированные версии прошивки / ",
+                "インストール禁止ファームウェア一覧 / ",
+                "封鎖韌體版本 / ",
+                "Các phiên bản firmware bị chặn / ",
+                "Αποκλεισμένες εκδόσεις firmware / ",
+                "ब्लॉक किए गए फर्मवेयर संस्करण / ",
+                "დაბლოკილი firmware ვერსიები / ",
+                "Geblokkeerde firmwareversies / ",
+                "إصدارات البرامج الثابتة المحظورة / ",
+                "Versiones de firmware bloqueadas / ",
+            )
+        ));
+    }
+
+    let blocked_suffixes = [
+        (
+            " 버전은 설치 금지 목록에 포함되어 있습니다.",
+            lpm_lang_text(
+                lang,
+                " is included in the blocked firmware list.",
+                " входит в список запрещённых версий прошивки.",
+                " はインストール禁止リストに含まれています。",
+                " 已列入封鎖韌體清單。",
+                " nằm trong danh sách firmware bị chặn.",
+                " περιλαμβάνεται στη λίστα αποκλεισμένων firmware.",
+                " ब्लॉक की गई फर्मवेयर सूची में शामिल है।",
+                " შეტანილია დაბლოკილი firmware-ის სიაში.",
+                " staat in de lijst met geblokkeerde firmware.",
+                " موجود في قائمة البرامج الثابتة المحظورة.",
+                " está incluida en la lista de firmware bloqueado.",
+            ),
+        ),
+        (
+            " 버전은 설치 금지 목록에 포함되어 있지 않습니다.",
+            lpm_lang_text(
+                lang,
+                " is not included in the blocked firmware list.",
+                " не входит в список запрещённых версий прошивки.",
+                " はインストール禁止リストに含まれていません。",
+                " 未列入封鎖韌體清單。",
+                " không nằm trong danh sách firmware bị chặn.",
+                " δεν περιλαμβάνεται στη λίστα αποκλεισμένων firmware.",
+                " ब्लॉक की गई फर्मवेयर सूची में शामिल नहीं है।",
+                " არ არის შეტანილი დაბლოკილი firmware-ის სიაში.",
+                " staat niet in de lijst met geblokkeerde firmware.",
+                " غير موجود في قائمة البرامج الثابتة المحظورة.",
+                " no está incluida en la lista de firmware bloqueado.",
+            ),
+        ),
+        (
+            " 모델의 설치 금지 버전이 등록되어 있지 않습니다.",
+            lpm_lang_text(
+                lang,
+                " has no registered blocked firmware versions.",
+                " не имеет зарегистрированных запрещённых версий прошивки.",
+                " には登録済みのインストール禁止バージョンがありません。",
+                " 尚未登錄任何封鎖韌體版本。",
+                " không có phiên bản firmware bị chặn nào được đăng ký.",
+                " δεν έχει καταχωρισμένες αποκλεισμένες εκδόσεις firmware.",
+                " के लिए कोई ब्लॉक किया गया फर्मवेयर संस्करण पंजीकृत नहीं है।",
+                " მოდელისთვის დაბლოკილი firmware ვერსიები რეგისტრირებული არ არის.",
+                " heeft geen geregistreerde geblokkeerde firmwareversies.",
+                " لا توجد له إصدارات برامج ثابتة محظورة مسجلة.",
+                " no tiene versiones de firmware bloqueadas registradas.",
+            ),
+        ),
+        (
+            " 차단 펌웨어 규칙을 온라인에서 확인하지 못했습니다.",
+            lpm_lang_text(
+                lang,
+                " firmware blocking rules could not be checked online.",
+                " — не удалось проверить правила блокировки прошивки в сети.",
+                " のファームウェア遮断ルールをオンラインで確認できませんでした。",
+                " 的韌體封鎖規則無法在線上確認。",
+                " không thể kiểm tra quy tắc chặn firmware trực tuyến.",
+                " — δεν ήταν δυνατός ο διαδικτυακός έλεγχος των κανόνων αποκλεισμού firmware.",
+                " के फर्मवेयर ब्लॉक नियम ऑनलाइन जाँचे नहीं जा सके।",
+                " firmware-ის დაბლოკვის წესები ონლაინ ვერ შემოწმდა.",
+                " — de firmwareblokkeringsregels konden niet online worden gecontroleerd.",
+                " تعذّر التحقق من قواعد حظر البرامج الثابتة عبر الإنترنت.",
+                " no pudo comprobar en línea las reglas de bloqueo de firmware.",
+            ),
+        ),
+    ];
+
+    for (suffix, translated_suffix) in blocked_suffixes {
+        if let Some(value) = text.strip_suffix(suffix) {
+            return Some(format!("{value}{translated_suffix}"));
+        }
+    }
+
+    if let Some(rest) = text.strip_prefix("[Image] image 폴더에 ") {
+        if let Some(files) = rest.strip_suffix(" 파일을 복사합니다.") {
+            return Some(format!(
+                "{}{files}",
+                lpm_lang_text(
+                    lang,
+                    "[Image] Copying files to the image folder: ",
+                    "[Image] Копирование файлов в папку image: ",
+                    "[Image] imageフォルダーへファイルをコピー：",
+                    "[Image] 複製檔案至 image 資料夾：",
+                    "[Image] Sao chép tệp vào thư mục image: ",
+                    "[Image] Αντιγραφή αρχείων στον φάκελο image: ",
+                    "[Image] image फ़ोल्डर में फ़ाइलें कॉपी की जा रही हैं: ",
+                    "[Image] ფაილების image საქაღალდეში კოპირება: ",
+                    "[Image] Bestanden kopiëren naar de image-map: ",
+                    "[Image] نسخ الملفات إلى مجلد image: ",
+                    "[Image] Copiando archivos a la carpeta image: ",
+                )
+            ));
+        }
+    }
+
+    if let Some(rest) = text.strip_prefix("[Image] ") {
+        if let Some(package) = rest.strip_suffix(" lk, dtbo 파일을 다운로드 합니다.") {
+            return Some(format!(
+                "{}{package} lk/dtbo",
+                lpm_lang_text(
+                    lang,
+                    "[Image] Downloading model-specific files: ",
+                    "[Image] Загрузка файлов для модели: ",
+                    "[Image] モデル専用ファイルをダウンロード：",
+                    "[Image] 下載型號專用檔案：",
+                    "[Image] Đang tải tệp dành cho model: ",
+                    "[Image] Λήψη αρχείων για το μοντέλο: ",
+                    "[Image] मॉडल-विशिष्ट फ़ाइलें डाउनलोड हो रही हैं: ",
+                    "[Image] მოდელის ფაილების ჩამოტვირთვა: ",
+                    "[Image] Modelspecifieke bestanden downloaden: ",
+                    "[Image] تنزيل ملفات خاصة بالطراز: ",
+                    "[Image] Descargando archivos específicos del modelo: ",
+                )
+            ));
+        }
+    }
+
+    if let Some(rest) = text.strip_prefix("[Plan] 작업 scatter XML 재파싱: 성공 / root: ") {
+        let rest = rest.replace(
+            "개",
+            lpm_lang_text(
+                lang,
+                " items",
+                " шт.",
+                " 件",
+                " 個",
+                " mục",
+                " στοιχεία",
+                " आइटम",
+                " ერთეული",
+                " items",
+                " عناصر",
+                " elementos",
+            ),
+        );
+        return Some(format!(
+            "{}{rest}",
+            lpm_lang_text(
+                lang,
+                "[Plan] Working scatter XML parsed again successfully / root: ",
+                "[Plan] Рабочий scatter XML успешно повторно разобран / root: ",
+                "[Plan] 作業用scatter XMLの再解析に成功 / root：",
+                "[Plan] 工作用 scatter XML 重新解析成功 / root：",
+                "[Plan] Đã phân tích lại scatter XML làm việc thành công / root: ",
+                "[Plan] Επιτυχής επανεπεξεργασία του scatter XML εργασίας / root: ",
+                "[Plan] कार्य scatter XML दोबारा सफलतापूर्वक पार्स हुआ / root: ",
+                "[Plan] სამუშაო scatter XML წარმატებით ხელახლა დამუშავდა / root: ",
+                "[Plan] Werk-scatter XML opnieuw geparseerd / root: ",
+                "[Plan] تمت إعادة تحليل scatter XML للعمل بنجاح / root: ",
+                "[Plan] Scatter XML de trabajo analizado de nuevo correctamente / root: ",
+            )
+        ));
+    }
+
+    if let Some(rest) = text.strip_prefix("[Log] ") {
+        if let Some((flow, remainder)) = rest.split_once(" 작업 로그를 ") {
+            if let Some(path) = remainder.strip_suffix("에 저장합니다.") {
+                return Some(format!(
+                    "{}{flow}: {path}",
+                    lpm_lang_text(
+                        lang,
+                        "[Log] Saving task log for ",
+                        "[Log] Сохранение журнала задачи ",
+                        "[Log] 作業ログを保存：",
+                        "[Log] 儲存工作日誌：",
+                        "[Log] Lưu nhật ký tác vụ ",
+                        "[Log] Αποθήκευση αρχείου καταγραφής εργασίας ",
+                        "[Log] कार्य लॉग सहेजा जा रहा है ",
+                        "[Log] სამუშაო ჟურნალის შენახვა ",
+                        "[Log] Taaklog opslaan voor ",
+                        "[Log] حفظ سجل المهمة ",
+                        "[Log] Guardando el registro de la tarea ",
+                    )
+                ));
+            }
+        }
+    }
+
+    if let Some(rest) = text.strip_prefix("[Log] 텍스트 파일 저장 완료: ") {
+        return Some(format!(
+            "{}{rest}",
+            lpm_lang_text(
+                lang,
+                "[Log] Text file saved: ",
+                "[Log] Текстовый файл сохранён: ",
+                "[Log] テキストファイルを保存しました：",
+                "[Log] 文字檔已儲存：",
+                "[Log] Đã lưu tệp văn bản: ",
+                "[Log] Το αρχείο κειμένου αποθηκεύτηκε: ",
+                "[Log] टेक्स्ट फ़ाइल सहेजी गई: ",
+                "[Log] ტექსტური ფაილი შენახულია: ",
+                "[Log] Tekstbestand opgeslagen: ",
+                "[Log] تم حفظ الملف النصي: ",
+                "[Log] Archivo de texto guardado: ",
+            )
+        ));
+    }
+
+    if let Some(rest) = text.strip_prefix("[Image] 기기에 ") {
+        if let Some(region) = rest.strip_suffix("을 설치합니다.") {
+            return Some(format!(
+                "{}{region}",
+                lpm_lang_text(
+                    lang,
+                    "[Image] ROM to install on the device: ",
+                    "[Image] ROM для установки на устройство: ",
+                    "[Image] デバイスにインストールするROM：",
+                    "[Image] 將安裝至裝置的 ROM：",
+                    "[Image] ROM sẽ cài trên thiết bị: ",
+                    "[Image] ROM που θα εγκατασταθεί στη συσκευή: ",
+                    "[Image] डिवाइस पर इंस्टॉल होने वाला ROM: ",
+                    "[Image] მოწყობილობაზე დასაყენებელი ROM: ",
+                    "[Image] ROM die op het apparaat wordt geïnstalleerd: ",
+                    "[Image] الروم الذي سيتم تثبيته على الجهاز: ",
+                    "[Image] ROM que se instalará en el dispositivo: ",
+                )
+            ));
+        }
+    }
+
+    let prefixes = [
+        ("[설정] 초기 언어 설정: ", lpm_lang_text(lang, "[Settings] Initial language: ", "[Настройки] Начальный язык: ", "[設定] 初期言語：", "[設定] 初始語言：", "[Cài đặt] Ngôn ngữ ban đầu: ", "[Ρυθμίσεις] Αρχική γλώσσα: ", "[सेटिंग्स] प्रारंभिक भाषा: ", "[პარამეტრები] საწყისი ენა: ", "[Instellingen] Begintaal: ", "[الإعدادات] اللغة الأولية: ", "[Ajustes] Idioma inicial: ")),
+        ("[설정] 언어 설정 파일 경로: ", lpm_lang_text(lang, "[Settings] Language settings file: ", "[Настройки] Файл настроек языка: ", "[設定] 言語設定ファイル：", "[設定] 語言設定檔：", "[Cài đặt] Tệp cài đặt ngôn ngữ: ", "[Ρυθμίσεις] Αρχείο ρυθμίσεων γλώσσας: ", "[सेटिंग्स] भाषा सेटिंग फ़ाइल: ", "[პარამეტრები] ენის პარამეტრების ფაილი: ", "[Instellingen] Taalinstellingenbestand: ", "[الإعدادات] ملف إعدادات اللغة: ", "[Ajustes] Archivo de configuración de idioma: ")),
+        ("[설정] 프로그램 언어를 선택했습니다: ", lpm_lang_text(lang, "[Settings] Program language selected: ", "[Настройки] Выбран язык программы: ", "[設定] プログラム言語を選択しました：", "[設定] 已選擇程式語言：", "[Cài đặt] Đã chọn ngôn ngữ chương trình: ", "[Ρυθμίσεις] Επιλέχθηκε γλώσσα προγράμματος: ", "[सेटिंग्स] प्रोग्राम भाषा चुनी गई: ", "[პარამეტრები] არჩეული პროგრამის ენა: ", "[Instellingen] Programmataal geselecteerd: ", "[الإعدادات] تم اختيار لغة البرنامج: ", "[Ajustes] Idioma del programa seleccionado: ")),
+        ("[설정] 언어 설정 파일에 저장했습니다: ", lpm_lang_text(lang, "[Settings] Saved to the language settings file: ", "[Настройки] Сохранено в файл настроек языка: ", "[設定] 言語設定ファイルに保存しました：", "[設定] 已儲存至語言設定檔：", "[Cài đặt] Đã lưu vào tệp cài đặt ngôn ngữ: ", "[Ρυθμίσεις] Αποθηκεύτηκε στο αρχείο ρυθμίσεων γλώσσας: ", "[सेटिंग्स] भाषा सेटिंग फ़ाइल में सहेजा गया: ", "[პარამეტრები] შენახულია ენის პარამეტრების ფაილში: ", "[Instellingen] Opgeslagen in het taalinstellingenbestand: ", "[الإعدادات] تم الحفظ في ملف إعدادات اللغة: ", "[Ajustes] Guardado en el archivo de configuración de idioma: ")),
+        ("선택한 image 폴더: ", lpm_lang_text(lang, "Selected image folder: ", "Выбранная папка image: ", "選択したimageフォルダー：", "已選擇的 image 資料夾：", "Thư mục image đã chọn: ", "Επιλεγμένος φάκελος image: ", "चयनित image फ़ोल्डर: ", "არჩეული image საქაღალდე: ", "Geselecteerde image-map: ", "مجلد image المحدد: ", "Carpeta image seleccionada: ")),
+        ("[Image] 모델명: ", lpm_lang_text(lang, "[Image] Model: ", "[Image] Модель: ", "[Image] モデル：", "[Image] 型號：", "[Image] Model: ", "[Image] Μοντέλο: ", "[Image] मॉडल: ", "[Image] მოდელი: ", "[Image] Model: ", "[Image] الطراز: ", "[Image] Modelo: ")),
+        ("[Image] 버전: ", lpm_lang_text(lang, "[Image] Version: ", "[Image] Версия: ", "[Image] バージョン：", "[Image] 版本：", "[Image] Phiên bản: ", "[Image] Έκδοση: ", "[Image] संस्करण: ", "[Image] ვერსია: ", "[Image] Versie: ", "[Image] الإصدار: ", "[Image] Versión: ")),
+        ("[Image] ROM 타입: ", lpm_lang_text(lang, "[Image] ROM type: ", "[Image] Тип ROM: ", "[Image] ROMタイプ：", "[Image] ROM 類型：", "[Image] Loại ROM: ", "[Image] Τύπος ROM: ", "[Image] ROM प्रकार: ", "[Image] ROM ტიპი: ", "[Image] ROM-type: ", "[Image] نوع ROM: ", "[Image] Tipo de ROM: ")),
+        ("[Image] 플랫폼: ", lpm_lang_text(lang, "[Image] Platform: ", "[Image] Платформа: ", "[Image] プラットフォーム：", "[Image] 平台：", "[Image] Nền tảng: ", "[Image] Πλατφόρμα: ", "[Image] प्लेटफ़ॉर्म: ", "[Image] პლატფორმა: ", "[Image] Platform: ", "[Image] المنصة: ", "[Image] Plataforma: ")),
+        ("[ADB] Android 버전: ", lpm_lang_text(lang, "[ADB] Android version: ", "[ADB] Версия Android: ", "[ADB] Androidバージョン：", "[ADB] Android 版本：", "[ADB] Phiên bản Android: ", "[ADB] Έκδοση Android: ", "[ADB] Android संस्करण: ", "[ADB] Android ვერსია: ", "[ADB] Android-versie: ", "[ADB] إصدار Android: ", "[ADB] Versión de Android: ")),
+        ("[ADB] 플랫폼: ", lpm_lang_text(lang, "[ADB] Platform: ", "[ADB] Платформа: ", "[ADB] プラットフォーム：", "[ADB] 平台：", "[ADB] Nền tảng: ", "[ADB] Πλατφόρμα: ", "[ADB] प्लेटफ़ॉर्म: ", "[ADB] პლატფორმა: ", "[ADB] Platform: ", "[ADB] المنصة: ", "[ADB] Plataforma: ")),
+        ("[ADB] 모델: ", lpm_lang_text(lang, "[ADB] Model: ", "[ADB] Модель: ", "[ADB] モデル：", "[ADB] 型號：", "[ADB] Model: ", "[ADB] Μοντέλο: ", "[ADB] मॉडल: ", "[ADB] მოდელი: ", "[ADB] Model: ", "[ADB] الطراز: ", "[ADB] Modelo: ")),
+        ("[ADB] 지역: ", lpm_lang_text(lang, "[ADB] Region: ", "[ADB] Регион: ", "[ADB] リージョン：", "[ADB] 區域：", "[ADB] Khu vực: ", "[ADB] Περιοχή: ", "[ADB] क्षेत्र: ", "[ADB] რეგიონი: ", "[ADB] Regio: ", "[ADB] المنطقة: ", "[ADB] Región: ")),
+        ("[Fastboot] current-slot: ", "[Fastboot] current-slot: "),
+        ("[Fastboot] current-slot 재확인: ", lpm_lang_text(lang, "[Fastboot] current-slot recheck: ", "[Fastboot] Повторная проверка current-slot: ", "[Fastboot] current-slot再確認：", "[Fastboot] 再次檢查 current-slot：", "[Fastboot] Kiểm tra lại current-slot: ", "[Fastboot] Επανέλεγχος current-slot: ", "[Fastboot] current-slot पुनः जाँच: ", "[Fastboot] current-slot-ის ხელახალი შემოწმება: ", "[Fastboot] current-slot opnieuw controleren: ", "[Fastboot] إعادة التحقق من current-slot: ", "[Fastboot] Nueva comprobación de current-slot: ")),
+        ("[Plan] patch 변경 수: ", lpm_lang_text(lang, "[Plan] Patch changes: ", "[Plan] Изменений patch: ", "[Plan] patch変更数：", "[Plan] patch 變更數：", "[Plan] Số thay đổi patch: ", "[Plan] Αλλαγές patch: ", "[Plan] patch बदलाव: ", "[Plan] patch ცვლილებები: ", "[Plan] Patchwijzigingen: ", "[Plan] تغييرات patch: ", "[Plan] Cambios de patch: ")),
+        ("[Plan] 데이터 유지 여부: ", lpm_lang_text(lang, "[Plan] Keep data: ", "[Plan] Сохранение данных: ", "[Plan] データ保持：", "[Plan] 保留資料：", "[Plan] Giữ dữ liệu: ", "[Plan] Διατήρηση δεδομένων: ", "[Plan] डेटा रखें: ", "[Plan] მონაცემების შენარჩუნება: ", "[Plan] Gegevens behouden: ", "[Plan] الاحتفاظ بالبيانات: ", "[Plan] Conservar datos: ")),
+        ("[Plan] current slot stage 필요 여부: ", lpm_lang_text(lang, "[Plan] Current-slot stage required: ", "[Plan] Требуется этап current slot: ", "[Plan] current slot手順の要否：", "[Plan] 是否需要 current slot 步驟：", "[Plan] Cần bước current slot: ", "[Plan] Απαιτείται στάδιο current slot: ", "[Plan] current slot चरण आवश्यक: ", "[Plan] საჭიროა current slot ეტაპი: ", "[Plan] Current-slotstap vereist: ", "[Plan] مرحلة current slot مطلوبة: ", "[Plan] Etapa current slot necesaria: ")),
+        ("[Plan] 기기 ADB 단계 필요 여부: ", lpm_lang_text(lang, "[Plan] Device ADB stage required: ", "[Plan] Требуется этап ADB устройства: ", "[Plan] デバイスADB手順の要否：", "[Plan] 是否需要裝置 ADB 步驟：", "[Plan] Cần bước ADB thiết bị: ", "[Plan] Απαιτείται στάδιο ADB συσκευής: ", "[Plan] डिवाइस ADB चरण आवश्यक: ", "[Plan] საჭიროა მოწყობილობის ADB ეტაპი: ", "[Plan] ADB-stap voor apparaat vereist: ", "[Plan] مرحلة ADB للجهاز مطلوبة: ", "[Plan] Etapa ADB del dispositivo necesaria: ")),
+        ("[Plan] proinfo 패치 필요 여부: ", lpm_lang_text(lang, "[Plan] Proinfo patch required: ", "[Plan] Требуется patch proinfo: ", "[Plan] proinfo patchの要否：", "[Plan] 是否需要 proinfo patch：", "[Plan] Cần patch proinfo: ", "[Plan] Απαιτείται patch proinfo: ", "[Plan] proinfo patch आवश्यक: ", "[Plan] საჭიროა proinfo patch: ", "[Plan] Proinfo-patch vereist: ", "[Plan] patch proinfo مطلوب: ", "[Plan] Patch de proinfo necesario: ")),
+        ("[ADB] platform: ", lpm_lang_text(lang, "[ADB] Platform: ", "[ADB] Платформа: ", "[ADB] プラットフォーム：", "[ADB] 平台：", "[ADB] Nền tảng: ", "[ADB] Πλατφόρμα: ", "[ADB] प्लेटफ़ॉर्म: ", "[ADB] პლატფორმა: ", "[ADB] Platform: ", "[ADB] المنصة: ", "[ADB] Plataforma: ")),
+        ("[ADB] model: ", lpm_lang_text(lang, "[ADB] Model: ", "[ADB] Модель: ", "[ADB] モデル：", "[ADB] 型號：", "[ADB] Model: ", "[ADB] Μοντέλο: ", "[ADB] मॉडल: ", "[ADB] მოდელი: ", "[ADB] Model: ", "[ADB] الطراز: ", "[ADB] Modelo: ")),
+        ("[ADB] region: ", lpm_lang_text(lang, "[ADB] Region: ", "[ADB] Регион: ", "[ADB] リージョン：", "[ADB] 區域：", "[ADB] Khu vực: ", "[ADB] Περιοχή: ", "[ADB] क्षेत्र: ", "[ADB] რეგიონი: ", "[ADB] Regio: ", "[ADB] المنطقة: ", "[ADB] Región: ")),
+        ("[Plan] 작업 scatter XML 재파싱: 성공 / root: ", lpm_lang_text(lang, "[Plan] Working scatter XML parsed again successfully / root: ", "[Plan] Рабочий scatter XML успешно повторно разобран / root: ", "[Plan] 作業用scatter XMLの再解析に成功 / root：", "[Plan] 工作用 scatter XML 重新解析成功 / root：", "[Plan] Đã phân tích lại scatter XML làm việc thành công / root: ", "[Plan] Επιτυχής επανεπεξεργασία του scatter XML εργασίας / root: ", "[Plan] कार्य scatter XML दोबारा सफलतापूर्वक पार्स हुआ / root: ", "[Plan] სამუშაო scatter XML წარმატებით ხელახლა დამუშავდა / root: ", "[Plan] Werk-scatter XML opnieuw geparseerd / root: ", "[Plan] تمت إعادة تحليل scatter XML للعمل بنجاح / root: ", "[Plan] Scatter XML de trabajo analizado de nuevo correctamente / root: ")),
+        ("[Image] image 폴더에 ", lpm_lang_text(lang, "[Image] Copying to the image folder: ", "[Image] Копирование в папку image: ", "[Image] imageフォルダーへコピー：", "[Image] 複製至 image 資料夾：", "[Image] Sao chép vào thư mục image: ", "[Image] Αντιγραφή στον φάκελο image: ", "[Image] image फ़ोल्डर में कॉपी: ", "[Image] image საქაღალდეში კოპირება: ", "[Image] Kopiëren naar de image-map: ", "[Image] النسخ إلى مجلد image: ", "[Image] Copiando a la carpeta image: ")),
+        ("[SPFT] DA 설정", lpm_lang_text(lang, "[SPFT] DA setup", "[SPFT] Настройка DA", "[SPFT] DA設定", "[SPFT] DA 設定", "[SPFT] Thiết lập DA", "[SPFT] Ρύθμιση DA", "[SPFT] DA सेटअप", "[SPFT] DA დაყენება", "[SPFT] DA-instelling", "[SPFT] إعداد DA", "[SPFT] Configuración de DA")),
+    ];
+
+    for (prefix, translated_prefix) in prefixes {
+        if let Some(rest) = text.strip_prefix(prefix) {
+            return Some(format!("{translated_prefix}{rest}"));
+        }
+    }
+
+    None
+}
+
+fn lpm_replace_numeric_korean_count_suffix(text: String, suffix: &str) -> String {
+    let mut output = String::with_capacity(text.len() + suffix.len());
+    let mut previous_was_digit = false;
+
+    for ch in text.chars() {
+        if ch == '개' && previous_was_digit {
+            output.push_str(suffix);
+            previous_was_digit = false;
+            continue;
+        }
+
+        output.push(ch);
+        previous_was_digit = ch.is_ascii_digit();
+    }
+
+    output
+}
+
+fn lpm_localize_runtime_fragments(lang: LanguageOption, content: String) -> String {
+    if lang.is_korean() || !contains_hangul(&content) {
+        return content;
+    }
+
+    let count_suffix = lpm_lang_text(
+        lang,
+        " items",
+        " шт.",
+        " 件",
+        " 個",
+        " mục",
+        " στοιχεία",
+        " आइटम",
+        " ერთეული",
+        " items",
+        " عناصر",
+        " elementos",
+    );
+    let mut out = lpm_replace_numeric_korean_count_suffix(content, count_suffix);
+    let pairs = [
+        ("일반 설치 [데이터 초기화]", lpm_lang_text(lang, "Standard installation [factory reset]", "Обычная установка [сброс данных]", "通常インストール［データ初期化］", "一般安裝［清除資料］", "Cài đặt thông thường [xóa dữ liệu]", "Τυπική εγκατάσταση [επαναφορά δεδομένων]", "सामान्य इंस्टॉल [डेटा रीसेट]", "ჩვეულებრივი დაყენება [მონაცემების წაშლა]", "Standaardinstallatie [fabrieksreset]", "تثبيت عادي [إعادة ضبط البيانات]", "Instalación normal [restablecer datos]")),
+        ("ROW 업데이트 [데이터 유지]", lpm_lang_text(lang, "ROW update [keep data]", "Обновление ROW [сохранение данных]", "ROW更新［データ保持］", "ROW 更新［保留資料］", "Cập nhật ROW [giữ dữ liệu]", "Ενημέρωση ROW [διατήρηση δεδομένων]", "ROW अपडेट [डेटा रखें]", "ROW განახლება [მონაცემების შენარჩუნება]", "ROW-update [gegevens behouden]", "تحديث ROW [الاحتفاظ بالبيانات]", "Actualización ROW [conservar datos]")),
+        ("재설치 [데이터 초기화]", lpm_lang_text(lang, "Recovery [factory reset]", "Восстановление [сброс данных]", "復旧［データ初期化］", "修復［清除資料］", "Khôi phục [xóa dữ liệu]", "Ανάκτηση [επαναφορά δεδομένων]", "रिकवरी [डेटा रीसेट]", "აღდგენა [მონაცემების წაშლა]", "Herstel [fabrieksreset]", "استرداد [إعادة ضبط البيانات]", "Recuperación [restablecer datos]")),
+        ("국가 코드 재설정 [proinfo only]", lpm_lang_text(lang, "Country-code reset [proinfo only]", "Сброс кода страны [только proinfo]", "国コード再設定［proinfoのみ］", "重設國家代碼［僅 proinfo］", "Đặt lại mã quốc gia [chỉ proinfo]", "Επαναφορά κωδικού χώρας [μόνο proinfo]", "देश कोड रीसेट [केवल proinfo]", "ქვეყნის კოდის აღდგენა [მხოლოდ proinfo]", "Landcode opnieuw instellen [alleen proinfo]", "إعادة تعيين رمز البلد [proinfo فقط]", "Restablecer código de país [solo proinfo]")),
+        ("필수 partition 상세", lpm_lang_text(lang, "Required partition details", "Сведения об обязательных partition", "必須partitionの詳細", "必要 partition 詳細", "Chi tiết partition bắt buộc", "Λεπτομέρειες υποχρεωτικών partition", "आवश्यक partition विवरण", "აუცილებელი partition-ის დეტალები", "Details van vereiste partition", "تفاصيل partition المطلوبة", "Detalles de partition obligatorias")),
+        ("patch plan 생성", lpm_lang_text(lang, "Patch plan creation", "Создание patch plan", "patch plan作成", "建立 patch plan", "Tạo patch plan", "Δημιουργία patch plan", "patch plan बनाना", "patch plan-ის შექმნა", "Patch plan maken", "إنشاء patch plan", "Creación del patch plan")),
+        ("patch plan 적용", lpm_lang_text(lang, "Patch plan application", "Применение patch plan", "patch plan適用", "套用 patch plan", "Áp dụng patch plan", "Εφαρμογή patch plan", "patch plan लागू करना", "patch plan-ის გამოყენება", "Patch plan toepassen", "تطبيق patch plan", "Aplicación del patch plan")),
+        ("patch 결과 재검증", lpm_lang_text(lang, "Patch result recheck", "Повторная проверка результата patch", "patch結果の再確認", "重新檢查 patch 結果", "Kiểm tra lại kết quả patch", "Επανέλεγχος αποτελέσματος patch", "patch परिणाम पुनः जाँच", "patch შედეგის ხელახალი შემოწმება", "Patchresultaat opnieuw controleren", "إعادة التحقق من نتيجة patch", "Nueva comprobación del resultado del patch")),
+        ("사용 가능", lpm_lang_text(lang, "available", "доступно", "使用可能", "可使用", "khả dụng", "διαθέσιμο", "उपलब्ध", "ხელმისაწვდომია", "beschikbaar", "متاح", "disponible")),
+        ("사용 불가", lpm_lang_text(lang, "unavailable", "недоступно", "使用不可", "不可使用", "không khả dụng", "μη διαθέσιμο", "अनुपलब्ध", "მიუწვდომელია", "niet beschikbaar", "غير متاح", "no disponible")),
+        ("적용됨", lpm_lang_text(lang, "applied", "применено", "適用済み", "已套用", "đã áp dụng", "εφαρμόστηκε", "लागू", "გამოყენებულია", "toegepast", "تم التطبيق", "aplicado")),
+        ("미적용", lpm_lang_text(lang, "not applied", "не применено", "未適用", "未套用", "chưa áp dụng", "δεν εφαρμόστηκε", "लागू नहीं", "არ არის გამოყენებული", "niet toegepast", "لم يتم التطبيق", "no aplicado")),
+        ("모두 통과", lpm_lang_text(lang, "all passed", "все проверки пройдены", "すべて合格", "全部通過", "tất cả đều đạt", "όλα πέρασαν", "सभी पास", "ყველა შემოწმება გავლილია", "alles geslaagd", "اجتازت جميعها", "todas superadas")),
+        ("통과", lpm_lang_text(lang, "passed", "пройдено", "合格", "通過", "đạt", "πέρασε", "पास", "გავლილია", "geslaagd", "تم الاجتياز", "superado")),
+        ("실패", lpm_lang_text(lang, "failed", "ошибка", "失敗", "失敗", "thất bại", "αποτυχία", "विफल", "ვერ შესრულდა", "mislukt", "فشل", "falló")),
+        ("오류", lpm_lang_text(lang, "errors", "ошибки", "エラー", "錯誤", "lỗi", "σφάλματα", "त्रुटियाँ", "შეცდომები", "fouten", "أخطاء", "errores")),
+        ("경고", lpm_lang_text(lang, "warnings", "предупреждения", "警告", "警告", "cảnh báo", "προειδοποιήσεις", "चेतावनियाँ", "გაფრთხილებები", "waarschuwingen", "تحذيرات", "advertencias")),
+        ("변경", lpm_lang_text(lang, "changes", "изменений", "変更", "變更", "thay đổi", "αλλαγές", "बदलाव", "ცვლილებები", "wijzigingen", "تغييرات", "cambios")),
+        ("있음", lpm_lang_text(lang, "yes", "да", "あり", "有", "có", "ναι", "हाँ", "კი", "ja", "نعم", "sí")),
+        ("없음", lpm_lang_text(lang, "no", "нет", "なし", "無", "không", "όχι", "नहीं", "არა", "nee", "لا", "no")),
+        ("누락", lpm_lang_text(lang, "missing", "отсутствует", "不足", "缺少", "thiếu", "λείπει", "अनुपलब्ध", "აკლია", "ontbreekt", "مفقود", "falta")),
+        ("초기화", lpm_lang_text(lang, "factory reset", "сброс", "初期化", "清除資料", "xóa dữ liệu", "επαναφορά", "रीसेट", "წაშლა", "fabrieksreset", "إعادة ضبط", "restablecer")),
+        ("유지", lpm_lang_text(lang, "keep", "сохранить", "保持", "保留", "giữ", "διατήρηση", "रखें", "შენარჩუნება", "behouden", "الاحتفاظ", "conservar")),
+        ("완료", lpm_lang_text(lang, "completed", "завершено", "完了", "完成", "hoàn tất", "ολοκληρώθηκε", "पूर्ण", "დასრულდა", "voltooid", "اكتمل", "completado")),
+        ("성공", lpm_lang_text(lang, "success", "успешно", "成功", "成功", "thành công", "επιτυχία", "सफल", "წარმატებით", "geslaagd", "نجاح", "correcto")),
+    ];
+
+    for (from, to) in pairs {
+        out = out.replace(from, to);
+    }
+
+    out
+}
+
 fn lpm_translate_owned(content: String) -> String {
     let lang = active_language_option();
+
     if lang.is_korean() {
         return content;
     }
 
-    if content.contains("실제 값과 다를 수")
+    let (content, spinner_frame) = detach_spinner_frame_owned(content);
+
+    let translated = if let Some(translated) =
+        lpm_translate_known_runtime_log(lang, content.as_str())
+    {
+        translated
+    } else if let Some(translated) =
+        lpm_translate_v312_runtime_message(lang, content.as_str())
+    {
+        translated
+    } else if content.contains("실제 값과 다를 수")
         || content.contains("実際 値")
         || content.contains("實際 值")
         || content.contains("実際の値と異なる")
         || content.contains("可能與實際值不同")
     {
-        return lpm_format_widevine_value(lang, content.as_str());
-    }
+        lpm_format_widevine_value(lang, content.as_str())
+    } else if let Some(translated) = lpm_translate_duration_text(lang, content.as_str()) {
+        translated
+    } else if let Some(translated) = lpm_translate_en_ru_dynamic(lang, content.as_str()) {
+        translated
+    } else if let Some(translated) = lpm_translate_en_ru_exact(lang, content.as_str()) {
+        translated.to_string()
+    } else if let Some(translated) = lpm_translate_dynamic_stage13(lang, content.as_str()) {
+        lpm_translate_en_ru_cleanup(lang, translated)
+    } else if let Some(translated) = lpm_translate_dynamic_stage11(lang, content.as_str()) {
+        lpm_translate_stage13_cleanup(lang, translated)
+    } else if let Some(translated) = lpm_translate_exact_stage13(lang, content.as_str()) {
+        translated.to_string()
+    } else if let Some(translated) = lpm_translate_exact_stage10(lang, content.as_str()) {
+        translated.to_string()
+    } else if let Some(translated) = lpm_translate_exact_stage8(lang, content.as_str()) {
+        translated.to_string()
+    } else if let Some(translated) = lpm_translate_exact_stage7(lang, content.as_str()) {
+        translated.to_string()
+    } else if let Some(translated) = lpm_translate_exact_stage6(lang, content.as_str()) {
+        translated.to_string()
+    } else if let Some(translated) = lpm_translate_exact_stage5(lang, content.as_str()) {
+        translated.to_string()
+    } else if let Some(translated) = lpm_translate_exact_stage4(lang, content.as_str()) {
+        translated.to_string()
+    } else if let Some(translated) = lpm_translate_exact_stage3(lang, content.as_str()) {
+        translated.to_string()
+    } else if let Some(translated) = lpm_translate_exact(lang, content.as_str()) {
+        translated.to_string()
+    } else {
+        let translated = lpm_translate_stage8_phrasewise(lang, content.clone());
+        let translated = lpm_translate_stage7_phrasewise(lang, translated);
+        let translated = lpm_translate_phrasewise(lang, translated);
+        let translated = lpm_translate_stage3_phrasewise(lang, translated);
+        let translated = lpm_translate_stage4_phrasewise(lang, translated);
+        let translated = lpm_translate_stage5_phrasewise(lang, translated);
+        let translated = lpm_translate_stage6_phrasewise(lang, translated);
+        let translated = lpm_translate_stage8_phrasewise(lang, translated);
+        let translated = lpm_translate_stage10_cleanup(lang, translated);
+        let translated = lpm_translate_stage11_final_cleanup(lang, translated);
+        let translated = lpm_translate_stage13_cleanup(lang, translated);
+        lpm_translate_en_ru_cleanup(lang, translated)
+    };
 
-    if let Some(translated) = lpm_translate_duration_text(lang, content.as_str()) {
-        return translated;
-    }
+    let translated = lpm_localize_runtime_fragments(lang, translated);
+    let localized = enforce_selected_language_output(lang, &content, translated);
 
-    if let Some(translated) = lpm_translate_en_ru_dynamic(lang, content.as_str()) {
-        return translated;
+    if let Some(frame) = spinner_frame {
+        format!("{} {}", localized.trim_end(), frame)
+    } else {
+        localized
     }
-
-    if let Some(translated) = lpm_translate_en_ru_exact(lang, content.as_str()) {
-        return translated.to_string();
-    }
-
-    if let Some(translated) = lpm_translate_dynamic_stage13(lang, content.as_str()) {
-        return lpm_translate_en_ru_cleanup(lang, translated);
-    }
-
-    if let Some(translated) = lpm_translate_dynamic_stage11(lang, content.as_str()) {
-        return lpm_translate_stage13_cleanup(lang, translated);
-    }
-
-    if let Some(translated) = lpm_translate_exact_stage13(lang, content.as_str()) {
-        return translated.to_string();
-    }
-
-    if let Some(translated) = lpm_translate_exact_stage10(lang, content.as_str()) {
-        return translated.to_string();
-    }
-
-    if let Some(translated) = lpm_translate_exact_stage8(lang, content.as_str()) {
-        return translated.to_string();
-    }
-
-    if let Some(translated) = lpm_translate_exact_stage7(lang, content.as_str()) {
-        return translated.to_string();
-    }
-
-    if let Some(translated) = lpm_translate_exact_stage6(lang, content.as_str()) {
-        return translated.to_string();
-    }
-
-    if let Some(translated) = lpm_translate_exact_stage5(lang, content.as_str()) {
-        return translated.to_string();
-    }
-
-    if let Some(translated) = lpm_translate_exact_stage4(lang, content.as_str()) {
-        return translated.to_string();
-    }
-
-    if let Some(translated) = lpm_translate_exact_stage3(lang, content.as_str()) {
-        return translated.to_string();
-    }
-
-    if let Some(translated) = lpm_translate_exact(lang, content.as_str()) {
-        return translated.to_string();
-    }
-
-    let translated = lpm_translate_stage8_phrasewise(lang, content);
-    let translated = lpm_translate_stage7_phrasewise(lang, translated);
-    let translated = lpm_translate_phrasewise(lang, translated);
-    let translated = lpm_translate_stage3_phrasewise(lang, translated);
-    let translated = lpm_translate_stage4_phrasewise(lang, translated);
-    let translated = lpm_translate_stage5_phrasewise(lang, translated);
-    let translated = lpm_translate_stage6_phrasewise(lang, translated);
-    let translated = lpm_translate_stage8_phrasewise(lang, translated);
-    let translated = lpm_translate_stage10_cleanup(lang, translated);
-    let translated = lpm_translate_stage11_final_cleanup(lang, translated);
-    let translated = lpm_translate_stage13_cleanup(lang, translated);
-    lpm_translate_en_ru_cleanup(lang, translated)
 }
 
+fn enforce_selected_language_output(
+    lang: LanguageOption,
+    original: &str,
+    translated: String,
+) -> String {
+    if !contains_hangul(&translated) {
+        return translated;
+    }
+
+    let korean_language_name = lpm_lang_text(
+        lang,
+        "Korean (ko)",
+        "Корейский (ko)",
+        "韓国語 (ko)",
+        "韓文 (ko)",
+        "Tiếng Hàn (ko)",
+        "Κορεατικά (ko)",
+        "कोरियाई (ko)",
+        "კორეული (ko)",
+        "Koreaans (ko)",
+        "الكورية (ko)",
+        "Coreano (ko)",
+    );
+
+    let mut localized = translated.replace("한국어 (ko)", korean_language_name);
+
+    for _ in 0..2 {
+        if !contains_hangul(&localized) {
+            return localized;
+        }
+
+        localized = lpm_translate_stage8_phrasewise(lang, localized);
+        localized = lpm_translate_stage7_phrasewise(lang, localized);
+        localized = lpm_translate_phrasewise(lang, localized);
+        localized = lpm_translate_stage3_phrasewise(lang, localized);
+        localized = lpm_translate_stage4_phrasewise(lang, localized);
+        localized = lpm_translate_stage5_phrasewise(lang, localized);
+        localized = lpm_translate_stage6_phrasewise(lang, localized);
+        localized = lpm_translate_stage10_cleanup(lang, localized);
+        localized = lpm_translate_stage11_final_cleanup(lang, localized);
+        localized = lpm_translate_stage13_cleanup(lang, localized);
+    }
+
+    if !contains_hangul(&localized) {
+        return localized;
+    }
+
+    let sanitized = remove_remaining_hangul(&localized);
+    if !sanitized.trim().is_empty() {
+        return sanitized;
+    }
+
+    let technical = remove_remaining_hangul(original);
+    if !technical.trim().is_empty() {
+        return technical;
+    }
+
+    lpm_lang_text(
+        lang,
+        "Operation status updated.",
+        "Состояние операции обновлено.",
+        "処理状態を更新しました。",
+        "作業狀態已更新。",
+        "Trạng thái tác vụ đã được cập nhật.",
+        "Η κατάσταση της εργασίας ενημερώθηκε.",
+        "कार्य की स्थिति अपडेट की गई।",
+        "ოპერაციის სტატუსი განახლდა.",
+        "De taakstatus is bijgewerkt.",
+        "تم تحديث حالة العملية.",
+        "Se actualizó el estado de la operación.",
+    )
+    .to_string()
+}
+
+fn remove_remaining_hangul(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut previous_space = false;
+
+    for ch in text.chars() {
+        let is_hangul = matches!(
+            ch,
+            '\u{1100}'..='\u{11ff}'
+                | '\u{3130}'..='\u{318f}'
+                | '\u{a960}'..='\u{a97f}'
+                | '\u{ac00}'..='\u{d7af}'
+                | '\u{d7b0}'..='\u{d7ff}'
+        );
+
+        if is_hangul {
+            if !previous_space && !output.is_empty() {
+                output.push(' ');
+            }
+            previous_space = true;
+            continue;
+        }
+
+        if ch == '\n' || ch == '\r' {
+            while output.ends_with(' ') {
+                output.pop();
+            }
+            output.push(ch);
+            previous_space = false;
+            continue;
+        }
+
+        if ch.is_whitespace() {
+            if !previous_space && !output.is_empty() {
+                output.push(' ');
+            }
+            previous_space = true;
+        } else {
+            output.push(ch);
+            previous_space = false;
+        }
+    }
+
+    output
+        .lines()
+        .map(|line| {
+            line.trim()
+                .trim_matches(|ch: char| matches!(ch, ':' | '/' | ',' | '-' | '|'))
+                .trim()
+                .to_string()
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn contains_hangul(text: &str) -> bool {
+    text.chars().any(|ch| matches!(ch, '\u{1100}'..='\u{11ff}' | '\u{3130}'..='\u{318f}' | '\u{a960}'..='\u{a97f}' | '\u{ac00}'..='\u{d7af}' | '\u{d7b0}'..='\u{d7ff}'))
+}
 
 fn lpm_translate_exact_stage10(lang: LanguageOption, key: &str) -> Option<&'static str> {
     Some(match key {
@@ -1408,6 +2204,7 @@ fn lpm_translate_exact_stage10(lang: LanguageOption, key: &str) -> Option<&'stat
         "선택한 image 폴더 정보" => lpm_lang_text(lang, "Selected Image Folder", "Выбранная папка image", "選択したimageフォルダー", "已選擇的 image 資料夾", "Thư mục image đã chọn", "Επιλεγμένος φάκελος image", "चयनित image फ़ोल्डर", "არჩეული image საქაღალდე", "Geselecteerde image-map", "مجلد image المحدد", "Carpeta image seleccionada"),
         "image 폴더 정보를 확인합니다." => lpm_lang_text(lang, "Check the selected image folder.", "Проверьте выбранную папку image.", "imageフォルダーを確認します。", "檢查已選擇的 image 資料夾。", "Kiểm tra thư mục image đã chọn.", "Ελέγξτε τον επιλεγμένο φάκελο image.", "चयनित image फ़ोल्डर जांचें।", "შეამოწმეთ არჩეული image საქაღალდე.", "Controleer de geselecteerde image-map.", "تحقق من مجلد image المحدد.", "Comprueba la carpeta image seleccionada."),
         "선택한 image 폴더" => lpm_lang_text(lang, "Selected image folder", "Выбранная папка image", "選択したimageフォルダー", "已選擇的 image 資料夾", "Thư mục image đã chọn", "Επιλεγμένος φάκελος image", "चयनित image फ़ोल्डर", "არჩეული image საქაღალდე", "Geselecteerde image-map", "مجلد image المحدد", "Carpeta image seleccionada"),
+        "펌웨어 버전, 플랫폼, 모델명, 필수 partition 유효성, MTK 드라이버 및 Microsoft Visual C++ 런타임 설치 유/무를 검사합니다." => lpm_lang_text(lang, "Check firmware version, platform, model name, required partition validity, MTK driver status, and Microsoft Visual C++ Runtime status.", "Проверка версии прошивки, платформы, модели, обязательных partition, драйвера MTK и среды выполнения Microsoft Visual C++.", "ファームウェアバージョン、プラットフォーム、モデル名、必須partition、MTKドライバー、Microsoft Visual C++ ランタイムの状態を確認します。", "檢查韌體版本、平台、型號、必要 partition、MTK 驅動程式與 Microsoft Visual C++ 執行階段狀態。", "Kiểm tra phiên bản firmware, nền tảng, model, partition bắt buộc, driver MTK và Microsoft Visual C++ Runtime.", "Έλεγχος έκδοσης firmware, πλατφόρμας, μοντέλου, υποχρεωτικών partition, οδηγού MTK και Microsoft Visual C++ Runtime.", "फर्मवेयर संस्करण, प्लेटफ़ॉर्म, मॉडल, आवश्यक partition, MTK ड्राइवर और Microsoft Visual C++ Runtime स्थिति जांचें।", "შემოწმდება firmware ვერსია, პლატფორმა, მოდელი, აუცილებელი partition, MTK დრაივერი და Microsoft Visual C++ Runtime.", "Controleert firmwareversie, platform, modelnaam, vereiste partition, MTK-driver en Microsoft Visual C++ Runtime.", "التحقق من إصدار firmware والمنصة والطراز وpartition المطلوبة وتعريف MTK وMicrosoft Visual C++ Runtime.", "Comprueba la versión de firmware, plataforma, modelo, partition obligatorias, controlador MTK y Microsoft Visual C++ Runtime."),
         "다음 단계로 진행해주세요." | "다음 단계로 진행해주세요" => lpm_lang_text(lang, "Proceed to the next step.", "Перейдите к следующему шагу.", "次のステップへ進んでください。", "請進入下一步。", "Hãy chuyển sang bước tiếp theo.", "Προχωρήστε στο επόμενο βήμα.", "अगले चरण पर जाएँ।", "გადადით შემდეგ ეტაპზე.", "Ga verder naar de volgende stap.", "انتقل إلى الخطوة التالية.", "Continúe con el siguiente paso."),
         "작업 선택" => lpm_lang_text(lang, "Select Task", "Выбор задачи", "作業選択", "選擇工作", "Chọn tác vụ", "Επιλογή εργασίας", "कार्य चुनें", "ამოცანის არჩევა", "Taak kiezen", "اختيار المهمة", "Seleccionar tarea"),
         "아래 작업을 선택해서 기기에 적용합니다." => lpm_lang_text(lang, "Select a task below and apply it to the device.", "Выберите задачу ниже и примените её к устройству.", "下の作業を選択してデバイスに適用します。", "選擇下方工作並套用至裝置。", "Chọn tác vụ bên dưới và áp dụng cho thiết bị.", "Επιλέξτε μια εργασία και εφαρμόστε τη στη συσκευή.", "नीचे कार्य चुनकर डिवाइस पर लागू करें।", "აირჩიეთ ამოცანა და გამოიყენეთ მოწყობილობაზე.", "Kies hieronder een taak en pas deze toe op het apparaat.", "اختر مهمة أدناه وطبقها على الجهاز.", "Seleccione una tarea y aplíquela al dispositivo."),
@@ -1432,6 +2229,9 @@ fn lpm_translate_exact_stage10(lang: LanguageOption, key: &str) -> Option<&'stat
         "국가 코드 변경" => lpm_lang_text(lang, "Change Country Code", "Изменить код страны", "国コード変更", "變更國家代碼", "Đổi mã quốc gia", "Αλλαγή κωδικού χώρας", "देश कोड बदलें", "ქვეყნის კოდის შეცვლა", "Landcode wijzigen", "تغيير رمز الدولة", "Cambiar código de país"),
         "MTK 드라이버 설치가 필요합니다!" => lpm_lang_text(lang, "MTK driver is required!", "Требуется драйвер MTK!", "MTKドライバーが必要です！", "需要 MTK 驅動程式！", "Cần driver MTK!", "Απαιτείται οδηγός MTK!", "MTK ड्राइवर आवश्यक है!", "საჭიროა MTK დრაივერი!", "MTK-driver vereist!", "مطلوب برنامج تشغيل MTK!", "Se requiere controlador MTK!"),
         "LPMBOX를 사용하기 위해선\n반드시 설치가 필요합니다\n드라이버 설치를 해주세요." => lpm_lang_text(lang, "Install the MTK driver before using LPMBox.", "Установите драйвер MTK перед использованием LPMBox.", "LPMBoxの使用前にMTKドライバーをインストールしてください。", "使用 LPMBox 前請先安裝 MTK 驅動程式。", "Hãy cài driver MTK trước khi dùng LPMBox.", "Εγκαταστήστε τον οδηγό MTK πριν χρησιμοποιήσετε το LPMBox.", "LPMBox उपयोग करने से पहले MTK ड्राइवर इंस्टॉल करें।", "LPMBox-ის გამოყენებამდე დააყენეთ MTK დრაივერი.", "Installeer de MTK-driver voordat u LPMBox gebruikt.", "ثبّت برنامج تشغيل MTK قبل استخدام LPMBox.", "Instale el controlador MTK antes de usar LPMBox."),
+        "Microsoft Visual C++ 런타임 설치가 필요합니다!" => lpm_lang_text(lang, "Microsoft Visual C++ Runtime is required!", "Требуется среда выполнения Microsoft Visual C++!", "Microsoft Visual C++ ランタイムが必要です！", "需要 Microsoft Visual C++ 執行階段！", "Cần Microsoft Visual C++ Runtime!", "Απαιτείται Microsoft Visual C++ Runtime!", "Microsoft Visual C++ Runtime आवश्यक है!", "საჭიროა Microsoft Visual C++ Runtime!", "Microsoft Visual C++ Runtime is vereist!", "مطلوب Microsoft Visual C++ Runtime!", "Se requiere Microsoft Visual C++ Runtime!"),
+        "VCRUNTIME140.dll / MSVCP140.dll 오류를 방지하기 위해\nMicrosoft Visual C++ x86(32비트) 및 x64(64비트) 런타임을 설치해주세요." => lpm_lang_text(lang, "Install Microsoft Visual C++ x86 (32-bit) and x64 (64-bit) Runtime to prevent VCRUNTIME140.dll / MSVCP140.dll errors.", "Установите Microsoft Visual C++ Runtime x86 (32-разрядную) и x64 (64-разрядную), чтобы предотвратить ошибки VCRUNTIME140.dll / MSVCP140.dll.", "VCRUNTIME140.dll / MSVCP140.dll エラーを防ぐため、Microsoft Visual C++ x86（32ビット）および x64（64ビット）ランタイムをインストールしてください。", "為避免 VCRUNTIME140.dll / MSVCP140.dll 錯誤，請安裝 Microsoft Visual C++ x86（32 位元）與 x64（64 位元）執行階段。", "Hãy cài Microsoft Visual C++ Runtime x86 (32-bit) và x64 (64-bit) để tránh lỗi VCRUNTIME140.dll / MSVCP140.dll.", "Εγκαταστήστε το Microsoft Visual C++ Runtime x86 (32-bit) και x64 (64-bit) για να αποτρέψετε σφάλματα VCRUNTIME140.dll / MSVCP140.dll.", "VCRUNTIME140.dll / MSVCP140.dll त्रुटियों से बचने के लिए Microsoft Visual C++ x86 (32-bit) और x64 (64-bit) Runtime इंस्टॉल करें।", "VCRUNTIME140.dll / MSVCP140.dll შეცდომების თავიდან ასაცილებლად დააყენეთ Microsoft Visual C++ x86 (32-bit) და x64 (64-bit) Runtime.", "Installeer Microsoft Visual C++ Runtime x86 (32-bits) en x64 (64-bits) om VCRUNTIME140.dll / MSVCP140.dll-fouten te voorkomen.", "ثبّت Microsoft Visual C++ Runtime بإصداري x86 ‏(32 بت) وx64 ‏(64 بت) لمنع أخطاء VCRUNTIME140.dll / MSVCP140.dll.", "Instale Microsoft Visual C++ Runtime x86 (32 bits) y x64 (64 bits) para evitar errores de VCRUNTIME140.dll / MSVCP140.dll."),
+        "Visual C++ 설치" => lpm_lang_text(lang, "Install Visual C++", "Установить Visual C++", "Visual C++ をインストール", "安裝 Visual C++", "Cài Visual C++", "Εγκατάσταση Visual C++", "Visual C++ इंस्टॉल करें", "Visual C++-ის დაყენება", "Visual C++ installeren", "تثبيت Visual C++", "Instalar Visual C++"),
         "Proceed to next step." | "Proceed to the next step." => lpm_lang_text(lang, "Proceed to the next step.", "Перейдите к следующему шагу.", "次のステップへ進んでください。", "請進入下一步。", "Chuyển sang bước tiếp theo.", "Προχωρήστε στο επόμενο βήμα.", "अगले चरण पर जाएँ।", "გადადით შემდეგ ეტაპზე.", "Ga verder naar de volgende stap.", "انتقل إلى الخطوة التالية.", "Continúe con el siguiente paso."),
         "Check the image folder information." => lpm_lang_text(lang, "Check the selected image folder.", "Проверьте выбранную папку image.", "選択したimageフォルダーを確認します。", "檢查已選擇的 image 資料夾。", "Kiểm tra thư mục image đã chọn.", "Ελέγξτε τον επιλεγμένο φάκελο image.", "चयनित image फ़ोल्डर जांचें।", "შეამოწმეთ არჩეული image საქაღალდე.", "Controleer de geselecteerde image-map.", "تحقق من مجلد image المحدد.", "Comprueba la carpeta image seleccionada."),
         _ => return None,
@@ -1586,6 +2386,192 @@ fn lpm_dashboard_body_size() -> u32 {
     }
 }
 
+fn lpm_dashboard_description_size() -> f32 {
+    (lpm_dashboard_body_size() as f32 - 0.5).max(8.0)
+}
+
+fn lpm_dashboard_promo_text(lang: LanguageOption, key: &str) -> &'static str {
+    match key {
+        "donate_title" => match lang {
+            LanguageOption::English => "Support the developer",
+            LanguageOption::Korean => "후원하기",
+            LanguageOption::Russian => "Поддержать разработчика",
+            LanguageOption::Japanese => "支援する",
+            LanguageOption::TraditionalChinese => "贊助支持",
+            LanguageOption::Vietnamese => "Ủng hộ",
+            LanguageOption::Greek => "Υποστήριξη",
+            LanguageOption::Hindi => "सहयोग करें",
+            LanguageOption::Georgian => "მხარდაჭერა",
+            LanguageOption::Dutch => "Doneren",
+            LanguageOption::Arabic => "دعم المطور",
+            LanguageOption::Spanish => "Apoyar",
+        },
+        "donate_description" => match lang {
+            LanguageOption::English => "Your support is a great source of strength and encouragement for the developer.",
+            LanguageOption::Korean => "개발자에게 큰 힘과 응원이 됩니다.",
+            LanguageOption::Russian => "Ваша поддержка придаёт разработчику сил и вдохновения.",
+            LanguageOption::Japanese => "開発者にとって大きな力と励みになります。",
+            LanguageOption::TraditionalChinese => "您的支持將給開發者帶來莫大的力量與鼓勵。",
+            LanguageOption::Vietnamese => "Sự ủng hộ của bạn là nguồn động lực lớn cho nhà phát triển.",
+            LanguageOption::Greek => "Η υποστήριξή σας δίνει μεγάλη δύναμη και ενθάρρυνση στον προγραμματιστή.",
+            LanguageOption::Hindi => "आपका सहयोग डेवलपर को बहुत शक्ति और प्रोत्साहन देता है।",
+            LanguageOption::Georgian => "თქვენი მხარდაჭერა დეველოპერს დიდ ძალასა და მოტივაციას აძლევს.",
+            LanguageOption::Dutch => "Uw steun geeft de ontwikkelaar veel kracht en motivatie.",
+            LanguageOption::Arabic => "يمنح دعمك المطور قوة وتشجيعًا كبيرين.",
+            LanguageOption::Spanish => "Tu apoyo brinda una gran fuerza y motivación al desarrollador.",
+        },
+        "start_title" => match lang {
+            LanguageOption::English => "Start LPMBOX",
+            LanguageOption::Korean => "LPMBOX 시작",
+            LanguageOption::Russian => "Запустить LPMBOX",
+            LanguageOption::Japanese => "LPMBOXを開始",
+            LanguageOption::TraditionalChinese => "啟動 LPMBOX",
+            LanguageOption::Vietnamese => "Bắt đầu LPMBOX",
+            LanguageOption::Greek => "Έναρξη LPMBOX",
+            LanguageOption::Hindi => "LPMBOX शुरू करें",
+            LanguageOption::Georgian => "LPMBOX-ის დაწყება",
+            LanguageOption::Dutch => "LPMBOX starten",
+            LanguageOption::Arabic => "بدء LPMBOX",
+            LanguageOption::Spanish => "Iniciar LPMBOX",
+        },
+        "start_description" => match lang {
+            LanguageOption::English => "Install a China ROM or global ROM, update the global ROM version, or recover the device.",
+            LanguageOption::Korean => "기기에 중국 내수롬 또는 글로벌롬 설치, 글로벌롬 버전 업데이트, 기기를 복구할 수 있습니다.",
+            LanguageOption::Russian => "Устанавливайте китайскую или глобальную ROM, обновляйте глобальную ROM и восстанавливайте устройство.",
+            LanguageOption::Japanese => "中国版ROMまたはグローバルROMのインストール、グローバルROMの更新、端末の復旧ができます。",
+            LanguageOption::TraditionalChinese => "可為裝置安裝中國版或全球版 ROM、更新全球版 ROM，並修復裝置。",
+            LanguageOption::Vietnamese => "Cài ROM nội địa Trung Quốc hoặc ROM quốc tế, cập nhật ROM quốc tế và khôi phục thiết bị.",
+            LanguageOption::Greek => "Εγκαταστήστε κινεζική ή παγκόσμια ROM, ενημερώστε την παγκόσμια ROM και ανακτήστε τη συσκευή.",
+            LanguageOption::Hindi => "डिवाइस पर चीनी या ग्लोबल ROM इंस्टॉल करें, ग्लोबल ROM अपडेट करें और डिवाइस रिकवर करें।",
+            LanguageOption::Georgian => "მოწყობილობაზე დააყენეთ ჩინური ან გლობალური ROM, განაახლეთ გლობალური ROM და აღადგინეთ მოწყობილობა.",
+            LanguageOption::Dutch => "Installeer een Chinese of wereldwijde ROM, werk de wereldwijde ROM bij en herstel het apparaat.",
+            LanguageOption::Arabic => "يمكنك تثبيت الروم الصيني أو العالمي، وتحديث الروم العالمي، واستعادة الجهاز.",
+            LanguageOption::Spanish => "Instala una ROM china o global, actualiza la ROM global y recupera el dispositivo.",
+        },
+        "more_title" => match lang {
+            LanguageOption::English => "More programs",
+            LanguageOption::Korean => "더 많은 프로그램",
+            LanguageOption::Russian => "Больше программ",
+            LanguageOption::Japanese => "その他のプログラム",
+            LanguageOption::TraditionalChinese => "更多程式",
+            LanguageOption::Vietnamese => "Thêm chương trình",
+            LanguageOption::Greek => "Περισσότερα προγράμματα",
+            LanguageOption::Hindi => "और प्रोग्राम",
+            LanguageOption::Georgian => "მეტი პროგრამა",
+            LanguageOption::Dutch => "Meer programma's",
+            LanguageOption::Arabic => "المزيد من البرامج",
+            LanguageOption::Spanish => "Más programas",
+        },
+        "more_description" => match lang {
+            LanguageOption::English => "Find useful programs and guides for Xiaoxin Pad.",
+            LanguageOption::Korean => "샤오신패드에 유용한 프로그램과 가이드를 확인하실 수 있습니다.",
+            LanguageOption::Russian => "Полезные программы и руководства для Xiaoxin Pad.",
+            LanguageOption::Japanese => "Xiaoxin Padに役立つプログラムとガイドを確認できます。",
+            LanguageOption::TraditionalChinese => "查看適用於小新平板的實用程式與指南。",
+            LanguageOption::Vietnamese => "Xem các chương trình và hướng dẫn hữu ích cho Xiaoxin Pad.",
+            LanguageOption::Greek => "Δείτε χρήσιμα προγράμματα και οδηγούς για το Xiaoxin Pad.",
+            LanguageOption::Hindi => "Xiaoxin Pad के लिए उपयोगी प्रोग्राम और गाइड देखें।",
+            LanguageOption::Georgian => "იხილეთ Xiaoxin Pad-ისთვის სასარგებლო პროგრამები და გზამკვლევები.",
+            LanguageOption::Dutch => "Bekijk nuttige programma's en handleidingen voor Xiaoxin Pad.",
+            LanguageOption::Arabic => "اطّلع على برامج وأدلة مفيدة لجهاز Xiaoxin Pad.",
+            LanguageOption::Spanish => "Consulta programas y guías útiles para Xiaoxin Pad.",
+        },
+        "move_button" => match lang {
+            LanguageOption::English => "Open",
+            LanguageOption::Korean => "이동",
+            LanguageOption::Russian => "Перейти",
+            LanguageOption::Japanese => "移動",
+            LanguageOption::TraditionalChinese => "前往",
+            LanguageOption::Vietnamese => "Đi tới",
+            LanguageOption::Greek => "Μετάβαση",
+            LanguageOption::Hindi => "खोलें",
+            LanguageOption::Georgian => "გადასვლა",
+            LanguageOption::Dutch => "Openen",
+            LanguageOption::Arabic => "انتقال",
+            LanguageOption::Spanish => "Ir",
+        },
+        "start_button" => match lang {
+            LanguageOption::English => "Get started",
+            LanguageOption::Korean => "시작하기",
+            LanguageOption::Russian => "Начать",
+            LanguageOption::Japanese => "開始する",
+            LanguageOption::TraditionalChinese => "開始使用",
+            LanguageOption::Vietnamese => "Bắt đầu",
+            LanguageOption::Greek => "Έναρξη",
+            LanguageOption::Hindi => "शुरू करें",
+            LanguageOption::Georgian => "დაწყება",
+            LanguageOption::Dutch => "Aan de slag",
+            LanguageOption::Arabic => "ابدأ الآن",
+            LanguageOption::Spanish => "Empezar",
+        },
+        _ => "",
+    }
+}
+
+fn lpm_routine_version_log_text(
+    lang: LanguageOption,
+    firmware: Option<&FirmwareInfo>,
+) -> String {
+    let image_version = if let Some(info) = firmware {
+        let model = info.model.trim();
+        let region = match info.region {
+            RomRegion::Prc => "PRC",
+            RomRegion::Row => "ROW",
+            RomRegion::Unknown => "UNKNOWN",
+        };
+        let raw_version = info
+            .version
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("UNKNOWN");
+        let version = raw_version.strip_suffix("_ST").unwrap_or(raw_version);
+
+        format!("{model}_{region}_{version}")
+    } else {
+        "UNKNOWN_UNKNOWN_UNKNOWN".to_string()
+    };
+
+    match lang {
+        LanguageOption::English => format!(
+            "[LPMBOX] LPMBOX program version: {APP_DISPLAY_VERSION} / Selected image folder: {image_version}"
+        ),
+        LanguageOption::Korean => format!(
+            "[LPMBOX] LPMBOX 프로그램 버전: {APP_DISPLAY_VERSION} / 선택한 image 폴더: {image_version}"
+        ),
+        LanguageOption::Russian => format!(
+            "[LPMBOX] Версия программы LPMBOX: {APP_DISPLAY_VERSION} / Выбранная папка image: {image_version}"
+        ),
+        LanguageOption::Japanese => format!(
+            "[LPMBOX] LPMBOXプログラムバージョン: {APP_DISPLAY_VERSION} / 選択したimageフォルダー: {image_version}"
+        ),
+        LanguageOption::TraditionalChinese => format!(
+            "[LPMBOX] LPMBOX 程式版本：{APP_DISPLAY_VERSION} / 已選擇的 image 資料夾：{image_version}"
+        ),
+        LanguageOption::Vietnamese => format!(
+            "[LPMBOX] Phiên bản chương trình LPMBOX: {APP_DISPLAY_VERSION} / Thư mục image đã chọn: {image_version}"
+        ),
+        LanguageOption::Greek => format!(
+            "[LPMBOX] Έκδοση προγράμματος LPMBOX: {APP_DISPLAY_VERSION} / Επιλεγμένος φάκελος image: {image_version}"
+        ),
+        LanguageOption::Hindi => format!(
+            "[LPMBOX] LPMBOX प्रोग्राम संस्करण: {APP_DISPLAY_VERSION} / चयनित image फ़ोल्डर: {image_version}"
+        ),
+        LanguageOption::Georgian => format!(
+            "[LPMBOX] LPMBOX პროგრამის ვერსია: {APP_DISPLAY_VERSION} / არჩეული image საქაღალდე: {image_version}"
+        ),
+        LanguageOption::Dutch => format!(
+            "[LPMBOX] LPMBOX-programmaversie: {APP_DISPLAY_VERSION} / Geselecteerde image-map: {image_version}"
+        ),
+        LanguageOption::Arabic => format!(
+            "[LPMBOX] إصدار برنامج LPMBOX: {APP_DISPLAY_VERSION} / مجلد image المحدد: {image_version}"
+        ),
+        LanguageOption::Spanish => format!(
+            "[LPMBOX] Versión del programa LPMBOX: {APP_DISPLAY_VERSION} / Carpeta image seleccionada: {image_version}"
+        ),
+    }
+}
+
 fn lpm_equal_button_width(labels: &[&str], min_width: f32, max_width: f32) -> f32 {
     let mut widest = min_width;
     for label in labels {
@@ -1651,7 +2637,20 @@ fn lpm_translate_exact_stage8(lang: LanguageOption, key: &str) -> Option<&'stati
         "저장된 언어 설정" => lpm_lang_text(lang, "Saved language setting", "Сохранённая настройка языка", "保存された言語設定", "已儲存的語言設定", "Cài đặt ngôn ngữ đã lưu", "Αποθηκευμένη ρύθμιση γλώσσας", "सहेजी गई भाषा सेटिंग", "შენახული ენის პარამეტრი", "Opgeslagen taalinstelling", "إعداد اللغة المحفوظ", "Configuración de idioma guardada"),
         "Windows OS 언어" => lpm_lang_text(lang, "Windows OS language", "Язык Windows", "Windows OSの言語", "Windows OS 語言", "Ngôn ngữ Windows", "Γλώσσα Windows", "Windows OS भाषा", "Windows OS-ის ენა", "Windows-taal", "لغة Windows", "Idioma de Windows"),
         "기본값 English" => lpm_lang_text(lang, "Default English", "Английский по умолчанию", "既定値 English", "預設 English", "Mặc định English", "Προεπιλογή English", "डिफ़ॉल्ट English", "ნაგულისხმევი English", "Standaard English", "English افتراضي", "English predeterminado"),
-        "한국어 (ko)" => "한국어 (ko)",
+        "한국어 (ko)" => lpm_lang_text(
+            lang,
+            "Korean (ko)",
+            "Корейский (ko)",
+            "韓国語 (ko)",
+            "韓文 (ko)",
+            "Tiếng Hàn (ko)",
+            "Κορεατικά (ko)",
+            "कोरियाई (ko)",
+            "კორეული (ko)",
+            "Koreaans (ko)",
+            "الكورية (ko)",
+            "Coreano (ko)",
+        ),
         _ => return None,
     })
 }
@@ -1682,8 +2681,6 @@ fn lpm_stage8_phrase_pairs(lang: LanguageOption) -> &'static [(&'static str, &'s
             ("언어 설정 파일 경로", "language setting file path"),
             ("언어 설정 파일에 저장했습니다", "saved to the language setting file"),
             ("기준", "source"),
-            ("최신 block_firmware.ini 다운로드를 위해 기존 파일을 제거했습니다", "removed the existing file to download the latest block_firmware.ini"),
-            ("기존 block_firmware.ini 파일 제거 실패", "failed to remove the existing block_firmware.ini file"),
             ("이미 최신 릴리즈 확인이 진행 중입니다.", "A latest release check is already in progress."),
             ("최신 LPMBox 릴리즈를 확인합니다.", "Checking the latest LPMBox release."),
             ("새 LPMBox 버전을 찾았습니다", "New LPMBox version found"),
@@ -2444,7 +3441,6 @@ fn lpm_phrase_pairs(lang: LanguageOption) -> &'static [(&'static str, &'static s
             ("ROM 타입을 확인할 수 없어 업데이트 실행을 보류합니다.", "Update is on hold because the ROM type cannot be verified."),
             ("ROW(글로벌롬)기기에 PRC(중국 내수롬)을 설치합니다.", "Installs PRC (China ROM) on a ROW (global ROM) device."),
             ("PRC(중국 내수롬)기기에 ROW(글로벌롬)을 설치합니다.", "Installs ROW (global ROM) on a PRC (China ROM) device."),
-            ("block_firmware.ini 파일을 다운로드 합니다.", "Downloading block_firmware.ini."),
             ("proinfo 파티션은 기기 복구 루틴에서 비활성화합니다.", "The proinfo partition is disabled in the device recovery routine."),
             ("국가 코드 변경을 위해 proinfo 파티션을 백업합니다.", "Backing up the proinfo partition to change the country code."),
             ("수정한 proinfo 파일을 image 폴더로 이동합니다.", "Moving the modified proinfo file to the image folder."),
@@ -2995,29 +3991,10 @@ const ROM_RIGHT_INFO_TITLE_FONT: u32 = 12;
 const ROM_RIGHT_INFO_VALUE_FONT: u32 = 11;
 const ROM_RIGHT_INFO_VALUE_MAX_CHARS: usize = 28;
 
-const ROM_BOTTOM_LABEL_FONT: u32 = 12;
-const ROM_BOTTOM_PATH_FONT: u32 = 11;
-const ROM_BOTTOM_PATH_MAX_CHARS: usize = 46;
 const ROM_BOTTOM_BUTTON_FONT: u32 = 12;
 
-const ROM_IMAGE_INFO_OUTER_WIDTH: f32 = 670.0;
-const ROM_IMAGE_INFO_OUTER_HEIGHT: f32 = 390.0;
-const ROM_IMAGE_INFO_GROUP_WIDTH: f32 = 620.0;
 
-const ROM_DIAGNOSTIC_LOG_WIDTH: f32 = 560.0;
-const ROM_DIAGNOSTIC_LOG_HEIGHT: f32 = 58.0;
-const ROM_DIAGNOSTIC_LOG_WRAP_CHARS: usize = 54;
 const LPMBOX_MIN_BATTERY_LEVEL: u8 = 20;
-
-#[allow(dead_code)]
-const LPMBOX_SUPPORTED_MODELS: [&str; 6] = [
-    "TB375FC",
-    "TB373FU",
-    "TB365FC",
-    "TB361FU",
-    "TB335FC",
-    "TB336FU",
-];
 
 fn main() -> iced::Result {
     #[cfg(target_os = "windows")]
@@ -3151,6 +4128,8 @@ struct App {
     rom_firmware_error: Option<String>,
     rom_mtk_driver_installed: Option<bool>,
     rom_mtk_driver_error: Option<String>,
+    rom_vc_runtime_status: Option<lpmbox_device::VcRuntimeStatus>,
+    rom_vc_runtime_error: Option<String>,
 
     live_rx: Option<Receiver<ProinfoLiveEvent>>,
     progress_line_indices: HashMap<String, usize>,
@@ -3182,10 +4161,7 @@ struct App {
     model_tb375_handle: iced::widget::image::Handle,
     model_tb365_handle: iced::widget::image::Handle,
     model_tb335_handle: iced::widget::image::Handle,
-
-    #[allow(dead_code)]
     rom_install_icon_handle: iced::widget::image::Handle,
-    #[allow(dead_code)]
     rom_update_icon_handle: iced::widget::image::Handle,
     folder_select_icon_handle: iced::widget::image::Handle,
     folder_check_icon_handle: iced::widget::image::Handle,
@@ -3244,16 +4220,8 @@ struct RomFirmwareCheckResult {
     firmware: FirmwareInfo,
     mtk_driver_installed: Option<bool>,
     mtk_driver_error: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct RomFolderIssueReport {
-    can_proceed: bool,
-    image_model_supported: bool,
-    connected_model_supported: bool,
-    battery_ok: bool,
-    blocked_firmware_ok: bool,
-    message: String,
+    vc_runtime_status: Option<lpmbox_device::VcRuntimeStatus>,
+    vc_runtime_error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -3345,8 +4313,6 @@ fn lpm_stage5_phrase_pairs(lang: LanguageOption) -> &'static [(&'static str, &'s
             ("[국가 코드 재설정] 국가 코드 재설정 작업을 시작합니다", "[Country Code Reset] Starting country code reset"),
             ("[국가 코드 재설정] 먼저 ROM 작업에서 image 폴더를 선택해주세요", "[Country Code Reset] Select an image folder from ROM Tasks first"),
             ("[국가 코드 재설정] proinfo 파티션만 플래싱하려면", "[Country Code Reset] To flash only the proinfo partition,"),
-            ("[Image] 최신 block_firmware.ini 다운로드를 위해 기존 파일을 제거했습니다", "[Image] Removed the existing file to download the latest block_firmware.ini"),
-            ("[경고] 기존 block_firmware.ini 파일 제거 실패", "[Warning] Failed to remove the existing block_firmware.ini file"),
             ("[Update] 최신 LPMBox 릴리즈를 확인합니다", "[Update] Checking the latest LPMBox release"),
             ("[Update] 새 LPMBox 버전을 찾았습니다", "[Update] Found a new LPMBox version"),
             ("[Update] 대시보드에 업데이트 안내 창을 표시합니다", "[Update] Showing the update notice on the dashboard"),
@@ -3616,8 +4582,6 @@ fn lpm_stage4_phrase_pairs(lang: LanguageOption) -> &'static [(&'static str, &'s
         Korean => &[],
     }
 }
-
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RomSlideTarget {
     Install,
@@ -3706,8 +4670,9 @@ impl LanguageOption {
             "en" | "english" => Some(LanguageOption::English),
             "ko" | "kr" | "ko-kr" | "korean" => Some(LanguageOption::Korean),
             "ru" | "russian" => Some(LanguageOption::Russian),
-            "ja" | "jp" | "ja-jp" | "japanese" => Some(LanguageOption::Japanese),
-            "zh" | "zh-cn" | "zh-tw" | "zh-hant" | "cn" | "tw" => Some(LanguageOption::TraditionalChinese),
+            "jp" | "ja" | "ja-jp" | "jp-jp" | "japanese" => Some(LanguageOption::Japanese),
+            "zh" | "zh-tw" | "zh-hk" | "zh-mo" | "zh-hant" | "tw" => Some(LanguageOption::TraditionalChinese),
+            "zh-cn" | "zh-sg" | "zh-hans" | "cn" => Some(LanguageOption::English),
             "vi" | "vi-vn" | "vietnamese" => Some(LanguageOption::Vietnamese),
             "el" | "el-gr" | "greek" => Some(LanguageOption::Greek),
             "hi" | "hi-in" | "hindi" => Some(LanguageOption::Hindi),
@@ -3721,8 +4686,20 @@ impl LanguageOption {
 
     fn from_locale(locale: &str) -> Option<Self> {
         let normalized = locale.trim().to_ascii_lowercase();
-        if normalized.starts_with("zh") {
+        if normalized.starts_with("zh-tw")
+            || normalized.starts_with("zh_hk")
+            || normalized.starts_with("zh-hk")
+            || normalized.starts_with("zh-mo")
+            || normalized.contains("hant")
+        {
             return Some(LanguageOption::TraditionalChinese);
+        }
+
+        if normalized.starts_with("zh-cn")
+            || normalized.starts_with("zh-sg")
+            || normalized.contains("hans")
+        {
+            return Some(LanguageOption::English);
         }
 
         let primary = normalized
@@ -3734,7 +4711,7 @@ impl LanguageOption {
             "en" => Some(LanguageOption::English),
             "ko" => Some(LanguageOption::Korean),
             "ru" => Some(LanguageOption::Russian),
-            "ja" => Some(LanguageOption::Japanese),
+            "ja" | "jp" => Some(LanguageOption::Japanese),
             "vi" => Some(LanguageOption::Vietnamese),
             "el" => Some(LanguageOption::Greek),
             "hi" => Some(LanguageOption::Hindi),
@@ -3754,7 +4731,7 @@ impl std::fmt::Display for LanguageOption {
             LanguageOption::Korean => "한국어 (ko)",
             LanguageOption::Russian => "Русский (ru)",
             LanguageOption::Japanese => "日本語 (jp)",
-            LanguageOption::TraditionalChinese => "繁體中文 (CN/TW)",
+            LanguageOption::TraditionalChinese => "繁體中文 (zh-TW)",
             LanguageOption::Vietnamese => "Tiếng Việt (vi)",
             LanguageOption::Greek => "Ελληνικά (el)",
             LanguageOption::Hindi => "हिन्दी (hi)",
@@ -3805,102 +4782,1211 @@ impl RuntimeFlowKind {
 #[derive(Debug, Clone, Copy)]
 struct CountryEntry {
     code: &'static str,
-    name: &'static str,
 }
 
-const ROM_COUNTRY_CODES: &[CountryEntry] = &[
-    CountryEntry { code: "AE", name: "United Arab Emirates" },
-    CountryEntry { code: "AM", name: "Armenia" },
-    CountryEntry { code: "AR", name: "Argentina" },
-    CountryEntry { code: "AT", name: "Austria" },
-    CountryEntry { code: "AU", name: "Australia" },
-    CountryEntry { code: "AZ", name: "Azerbaijan" },
-    CountryEntry { code: "BE", name: "Belgium" },
-    CountryEntry { code: "BG", name: "Bulgaria" },
-    CountryEntry { code: "BH", name: "Bahrain" },
-    CountryEntry { code: "BR", name: "Brazil" },
-    CountryEntry { code: "CA", name: "Canada" },
-    CountryEntry { code: "CH", name: "Switzerland" },
-    CountryEntry { code: "CL", name: "Chile" },
-    CountryEntry { code: "CN", name: "China" },
-    CountryEntry { code: "CO", name: "Colombia" },
-    CountryEntry { code: "CR", name: "Costa Rica" },
-    CountryEntry { code: "CY", name: "Cyprus" },
-    CountryEntry { code: "CZ", name: "Czech Republic" },
-    CountryEntry { code: "DE", name: "Germany" },
-    CountryEntry { code: "DK", name: "Denmark" },
-    CountryEntry { code: "EC", name: "Ecuador" },
-    CountryEntry { code: "EE", name: "Estonia" },
-    CountryEntry { code: "EG", name: "Egypt" },
-    CountryEntry { code: "ES", name: "Spain" },
-    CountryEntry { code: "FI", name: "Finland" },
-    CountryEntry { code: "FR", name: "France" },
-    CountryEntry { code: "GB", name: "United Kingdom" },
-    CountryEntry { code: "GE", name: "Georgia" },
-    CountryEntry { code: "GH", name: "Ghana" },
-    CountryEntry { code: "GR", name: "Greece" },
-    CountryEntry { code: "GT", name: "Guatemala" },
-    CountryEntry { code: "HK", name: "Hong Kong" },
-    CountryEntry { code: "HR", name: "Croatia" },
-    CountryEntry { code: "HU", name: "Hungary" },
-    CountryEntry { code: "ID", name: "Indonesia" },
-    CountryEntry { code: "IL", name: "Israel" },
-    CountryEntry { code: "IN", name: "India" },
-    CountryEntry { code: "IS", name: "Iceland" },
-    CountryEntry { code: "IT", name: "Italy" },
-    CountryEntry { code: "JO", name: "Jordan" },
-    CountryEntry { code: "JP", name: "Japan" },
-    CountryEntry { code: "KE", name: "Kenya" },
-    CountryEntry { code: "KG", name: "Kyrgyzstan" },
-    CountryEntry { code: "KR", name: "Korea" },
-    CountryEntry { code: "KW", name: "Kuwait" },
-    CountryEntry { code: "KZ", name: "Kazakhstan" },
-    CountryEntry { code: "LB", name: "Lebanon" },
-    CountryEntry { code: "LT", name: "Lithuania" },
-    CountryEntry { code: "LV", name: "Latvia" },
-    CountryEntry { code: "MA", name: "Morocco" },
-    CountryEntry { code: "MD", name: "Moldova" },
-    CountryEntry { code: "MX", name: "Mexico" },
-    CountryEntry { code: "MY", name: "Malaysia" },
-    CountryEntry { code: "MZ", name: "Mozambique" },
-    CountryEntry { code: "NG", name: "Nigeria" },
-    CountryEntry { code: "NL", name: "Netherlands" },
-    CountryEntry { code: "NO", name: "Norway" },
-    CountryEntry { code: "NZ", name: "New Zealand" },
-    CountryEntry { code: "OM", name: "Oman" },
-    CountryEntry { code: "PA", name: "Panama" },
-    CountryEntry { code: "PE", name: "Peru" },
-    CountryEntry { code: "PH", name: "Philippines" },
-    CountryEntry { code: "PK", name: "Pakistan" },
-    CountryEntry { code: "PL", name: "Poland" },
-    CountryEntry { code: "PT", name: "Portugal" },
-    CountryEntry { code: "QA", name: "Qatar" },
-    CountryEntry { code: "RO", name: "Romania" },
-    CountryEntry { code: "RS", name: "Serbia" },
-    CountryEntry { code: "RU", name: "Russia" },
-    CountryEntry { code: "SA", name: "Saudi Arabia" },
-    CountryEntry { code: "SE", name: "Sweden" },
-    CountryEntry { code: "SG", name: "Singapore" },
-    CountryEntry { code: "SI", name: "Slovenia" },
-    CountryEntry { code: "SK", name: "Slovakia" },
-    CountryEntry { code: "SV", name: "El Salvador" },
-    CountryEntry { code: "TH", name: "Thailand" },
-    CountryEntry { code: "TJ", name: "Tajikistan" },
-    CountryEntry { code: "TN", name: "Tunisia" },
-    CountryEntry { code: "TR", name: "Turkey" },
-    CountryEntry { code: "TW", name: "Taiwan" },
-    CountryEntry { code: "TZ", name: "Tanzania" },
-    CountryEntry { code: "UA", name: "Ukraine" },
-    CountryEntry { code: "UG", name: "Uganda" },
-    CountryEntry { code: "US", name: "United States" },
-    CountryEntry { code: "UY", name: "Uruguay" },
-    CountryEntry { code: "UZ", name: "Uzbekistan" },
-    CountryEntry { code: "VE", name: "Venezuela" },
-    CountryEntry { code: "VN", name: "Vietnam" },
+const ROM_COUNTRY_COUNT: usize = 88;
+
+const ROM_COUNTRY_CODES: &[CountryEntry; ROM_COUNTRY_COUNT] = &[
+    CountryEntry { code: "AE" },
+    CountryEntry { code: "AM" },
+    CountryEntry { code: "AR" },
+    CountryEntry { code: "AT" },
+    CountryEntry { code: "AU" },
+    CountryEntry { code: "AZ" },
+    CountryEntry { code: "BE" },
+    CountryEntry { code: "BG" },
+    CountryEntry { code: "BH" },
+    CountryEntry { code: "BR" },
+    CountryEntry { code: "CA" },
+    CountryEntry { code: "CH" },
+    CountryEntry { code: "CL" },
+    CountryEntry { code: "CN" },
+    CountryEntry { code: "CO" },
+    CountryEntry { code: "CR" },
+    CountryEntry { code: "CY" },
+    CountryEntry { code: "CZ" },
+    CountryEntry { code: "DE" },
+    CountryEntry { code: "DK" },
+    CountryEntry { code: "EC" },
+    CountryEntry { code: "EE" },
+    CountryEntry { code: "EG" },
+    CountryEntry { code: "ES" },
+    CountryEntry { code: "FI" },
+    CountryEntry { code: "FR" },
+    CountryEntry { code: "GB" },
+    CountryEntry { code: "GE" },
+    CountryEntry { code: "GH" },
+    CountryEntry { code: "GR" },
+    CountryEntry { code: "GT" },
+    CountryEntry { code: "HK" },
+    CountryEntry { code: "HR" },
+    CountryEntry { code: "HU" },
+    CountryEntry { code: "ID" },
+    CountryEntry { code: "IL" },
+    CountryEntry { code: "IN" },
+    CountryEntry { code: "IS" },
+    CountryEntry { code: "IT" },
+    CountryEntry { code: "JO" },
+    CountryEntry { code: "JP" },
+    CountryEntry { code: "KE" },
+    CountryEntry { code: "KG" },
+    CountryEntry { code: "KR" },
+    CountryEntry { code: "KW" },
+    CountryEntry { code: "KZ" },
+    CountryEntry { code: "LB" },
+    CountryEntry { code: "LT" },
+    CountryEntry { code: "LV" },
+    CountryEntry { code: "MA" },
+    CountryEntry { code: "MD" },
+    CountryEntry { code: "MX" },
+    CountryEntry { code: "MY" },
+    CountryEntry { code: "MZ" },
+    CountryEntry { code: "NG" },
+    CountryEntry { code: "NL" },
+    CountryEntry { code: "NO" },
+    CountryEntry { code: "NZ" },
+    CountryEntry { code: "OM" },
+    CountryEntry { code: "PA" },
+    CountryEntry { code: "PE" },
+    CountryEntry { code: "PH" },
+    CountryEntry { code: "PK" },
+    CountryEntry { code: "PL" },
+    CountryEntry { code: "PT" },
+    CountryEntry { code: "QA" },
+    CountryEntry { code: "RO" },
+    CountryEntry { code: "RS" },
+    CountryEntry { code: "RU" },
+    CountryEntry { code: "SA" },
+    CountryEntry { code: "SE" },
+    CountryEntry { code: "SG" },
+    CountryEntry { code: "SI" },
+    CountryEntry { code: "SK" },
+    CountryEntry { code: "SV" },
+    CountryEntry { code: "TH" },
+    CountryEntry { code: "TJ" },
+    CountryEntry { code: "TN" },
+    CountryEntry { code: "TR" },
+    CountryEntry { code: "TW" },
+    CountryEntry { code: "TZ" },
+    CountryEntry { code: "UA" },
+    CountryEntry { code: "UG" },
+    CountryEntry { code: "US" },
+    CountryEntry { code: "UY" },
+    CountryEntry { code: "UZ" },
+    CountryEntry { code: "VE" },
+    CountryEntry { code: "VN" },
 ];
 
+const ROM_COUNTRY_NAMES_EN: [&str; ROM_COUNTRY_COUNT] = [
+    "United Arab Emirates",
+    "Armenia",
+    "Argentina",
+    "Austria",
+    "Australia",
+    "Azerbaijan",
+    "Belgium",
+    "Bulgaria",
+    "Bahrain",
+    "Brazil",
+    "Canada",
+    "Switzerland",
+    "Chile",
+    "China",
+    "Colombia",
+    "Costa Rica",
+    "Cyprus",
+    "Czechia",
+    "Germany",
+    "Denmark",
+    "Ecuador",
+    "Estonia",
+    "Egypt",
+    "Spain",
+    "Finland",
+    "France",
+    "United Kingdom",
+    "Georgia",
+    "Ghana",
+    "Greece",
+    "Guatemala",
+    "Hong Kong SAR China",
+    "Croatia",
+    "Hungary",
+    "Indonesia",
+    "Israel",
+    "India",
+    "Iceland",
+    "Italy",
+    "Jordan",
+    "Japan",
+    "Kenya",
+    "Kyrgyzstan",
+    "South Korea",
+    "Kuwait",
+    "Kazakhstan",
+    "Lebanon",
+    "Lithuania",
+    "Latvia",
+    "Morocco",
+    "Moldova",
+    "Mexico",
+    "Malaysia",
+    "Mozambique",
+    "Nigeria",
+    "Netherlands",
+    "Norway",
+    "New Zealand",
+    "Oman",
+    "Panama",
+    "Peru",
+    "Philippines",
+    "Pakistan",
+    "Poland",
+    "Portugal",
+    "Qatar",
+    "Romania",
+    "Serbia",
+    "Russia",
+    "Saudi Arabia",
+    "Sweden",
+    "Singapore",
+    "Slovenia",
+    "Slovakia",
+    "El Salvador",
+    "Thailand",
+    "Tajikistan",
+    "Tunisia",
+    "Türkiye",
+    "Taiwan",
+    "Tanzania",
+    "Ukraine",
+    "Uganda",
+    "United States",
+    "Uruguay",
+    "Uzbekistan",
+    "Venezuela",
+    "Vietnam",
+];
+
+const ROM_COUNTRY_NAMES_KO: [&str; ROM_COUNTRY_COUNT] = [
+    "아랍에미리트",
+    "아르메니아",
+    "아르헨티나",
+    "오스트리아",
+    "오스트레일리아",
+    "아제르바이잔",
+    "벨기에",
+    "불가리아",
+    "바레인",
+    "브라질",
+    "캐나다",
+    "스위스",
+    "칠레",
+    "중국",
+    "콜롬비아",
+    "코스타리카",
+    "키프로스",
+    "체코",
+    "독일",
+    "덴마크",
+    "에콰도르",
+    "에스토니아",
+    "이집트",
+    "스페인",
+    "핀란드",
+    "프랑스",
+    "영국",
+    "조지아",
+    "가나",
+    "그리스",
+    "과테말라",
+    "홍콩(중국 특별행정구)",
+    "크로아티아",
+    "헝가리",
+    "인도네시아",
+    "이스라엘",
+    "인도",
+    "아이슬란드",
+    "이탈리아",
+    "요르단",
+    "일본",
+    "케냐",
+    "키르기스스탄",
+    "대한민국",
+    "쿠웨이트",
+    "카자흐스탄",
+    "레바논",
+    "리투아니아",
+    "라트비아",
+    "모로코",
+    "몰도바",
+    "멕시코",
+    "말레이시아",
+    "모잠비크",
+    "나이지리아",
+    "네덜란드",
+    "노르웨이",
+    "뉴질랜드",
+    "오만",
+    "파나마",
+    "페루",
+    "필리핀",
+    "파키스탄",
+    "폴란드",
+    "포르투갈",
+    "카타르",
+    "루마니아",
+    "세르비아",
+    "러시아",
+    "사우디아라비아",
+    "스웨덴",
+    "싱가포르",
+    "슬로베니아",
+    "슬로바키아",
+    "엘살바도르",
+    "태국",
+    "타지키스탄",
+    "튀니지",
+    "튀르키예",
+    "대만",
+    "탄자니아",
+    "우크라이나",
+    "우간다",
+    "미국",
+    "우루과이",
+    "우즈베키스탄",
+    "베네수엘라",
+    "베트남",
+];
+
+const ROM_COUNTRY_NAMES_RU: [&str; ROM_COUNTRY_COUNT] = [
+    "ОАЭ",
+    "Армения",
+    "Аргентина",
+    "Австрия",
+    "Австралия",
+    "Азербайджан",
+    "Бельгия",
+    "Болгария",
+    "Бахрейн",
+    "Бразилия",
+    "Канада",
+    "Швейцария",
+    "Чили",
+    "Китай",
+    "Колумбия",
+    "Коста-Рика",
+    "Кипр",
+    "Чехия",
+    "Германия",
+    "Дания",
+    "Эквадор",
+    "Эстония",
+    "Египет",
+    "Испания",
+    "Финляндия",
+    "Франция",
+    "Великобритания",
+    "Грузия",
+    "Гана",
+    "Греция",
+    "Гватемала",
+    "Гонконг (САР)",
+    "Хорватия",
+    "Венгрия",
+    "Индонезия",
+    "Израиль",
+    "Индия",
+    "Исландия",
+    "Италия",
+    "Иордания",
+    "Япония",
+    "Кения",
+    "Киргизия",
+    "Республика Корея",
+    "Кувейт",
+    "Казахстан",
+    "Ливан",
+    "Литва",
+    "Латвия",
+    "Марокко",
+    "Молдова",
+    "Мексика",
+    "Малайзия",
+    "Мозамбик",
+    "Нигерия",
+    "Нидерланды",
+    "Норвегия",
+    "Новая Зеландия",
+    "Оман",
+    "Панама",
+    "Перу",
+    "Филиппины",
+    "Пакистан",
+    "Польша",
+    "Португалия",
+    "Катар",
+    "Румыния",
+    "Сербия",
+    "Россия",
+    "Саудовская Аравия",
+    "Швеция",
+    "Сингапур",
+    "Словения",
+    "Словакия",
+    "Сальвадор",
+    "Таиланд",
+    "Таджикистан",
+    "Тунис",
+    "Турция",
+    "Тайвань",
+    "Танзания",
+    "Украина",
+    "Уганда",
+    "Соединенные Штаты",
+    "Уругвай",
+    "Узбекистан",
+    "Венесуэла",
+    "Вьетнам",
+];
+
+const ROM_COUNTRY_NAMES_JA: [&str; ROM_COUNTRY_COUNT] = [
+    "アラブ首長国連邦",
+    "アルメニア",
+    "アルゼンチン",
+    "オーストリア",
+    "オーストラリア",
+    "アゼルバイジャン",
+    "ベルギー",
+    "ブルガリア",
+    "バーレーン",
+    "ブラジル",
+    "カナダ",
+    "スイス",
+    "チリ",
+    "中国",
+    "コロンビア",
+    "コスタリカ",
+    "キプロス",
+    "チェコ",
+    "ドイツ",
+    "デンマーク",
+    "エクアドル",
+    "エストニア",
+    "エジプト",
+    "スペイン",
+    "フィンランド",
+    "フランス",
+    "イギリス",
+    "ジョージア",
+    "ガーナ",
+    "ギリシャ",
+    "グアテマラ",
+    "中華人民共和国香港特別行政区",
+    "クロアチア",
+    "ハンガリー",
+    "インドネシア",
+    "イスラエル",
+    "インド",
+    "アイスランド",
+    "イタリア",
+    "ヨルダン",
+    "日本",
+    "ケニア",
+    "キルギス",
+    "韓国",
+    "クウェート",
+    "カザフスタン",
+    "レバノン",
+    "リトアニア",
+    "ラトビア",
+    "モロッコ",
+    "モルドバ",
+    "メキシコ",
+    "マレーシア",
+    "モザンビーク",
+    "ナイジェリア",
+    "オランダ",
+    "ノルウェー",
+    "ニュージーランド",
+    "オマーン",
+    "パナマ",
+    "ペルー",
+    "フィリピン",
+    "パキスタン",
+    "ポーランド",
+    "ポルトガル",
+    "カタール",
+    "ルーマニア",
+    "セルビア",
+    "ロシア",
+    "サウジアラビア",
+    "スウェーデン",
+    "シンガポール",
+    "スロベニア",
+    "スロバキア",
+    "エルサルバドル",
+    "タイ",
+    "タジキスタン",
+    "チュニジア",
+    "トルコ",
+    "台湾",
+    "タンザニア",
+    "ウクライナ",
+    "ウガンダ",
+    "アメリカ合衆国",
+    "ウルグアイ",
+    "ウズベキスタン",
+    "ベネズエラ",
+    "ベトナム",
+];
+
+const ROM_COUNTRY_NAMES_ZH_TW: [&str; ROM_COUNTRY_COUNT] = [
+    "阿拉伯聯合大公國",
+    "亞美尼亞",
+    "阿根廷",
+    "奧地利",
+    "澳洲",
+    "亞塞拜然",
+    "比利時",
+    "保加利亞",
+    "巴林",
+    "巴西",
+    "加拿大",
+    "瑞士",
+    "智利",
+    "中國",
+    "哥倫比亞",
+    "哥斯大黎加",
+    "賽普勒斯",
+    "捷克",
+    "德國",
+    "丹麥",
+    "厄瓜多",
+    "愛沙尼亞",
+    "埃及",
+    "西班牙",
+    "芬蘭",
+    "法國",
+    "英國",
+    "喬治亞",
+    "迦納",
+    "希臘",
+    "瓜地馬拉",
+    "中國香港特別行政區",
+    "克羅埃西亞",
+    "匈牙利",
+    "印尼",
+    "以色列",
+    "印度",
+    "冰島",
+    "義大利",
+    "約旦",
+    "日本",
+    "肯亞",
+    "吉爾吉斯",
+    "南韓",
+    "科威特",
+    "哈薩克",
+    "黎巴嫩",
+    "立陶宛",
+    "拉脫維亞",
+    "摩洛哥",
+    "摩爾多瓦",
+    "墨西哥",
+    "馬來西亞",
+    "莫三比克",
+    "奈及利亞",
+    "荷蘭",
+    "挪威",
+    "紐西蘭",
+    "阿曼",
+    "巴拿馬",
+    "秘魯",
+    "菲律賓",
+    "巴基斯坦",
+    "波蘭",
+    "葡萄牙",
+    "卡達",
+    "羅馬尼亞",
+    "塞爾維亞",
+    "俄羅斯",
+    "沙烏地阿拉伯",
+    "瑞典",
+    "新加坡",
+    "斯洛維尼亞",
+    "斯洛伐克",
+    "薩爾瓦多",
+    "泰國",
+    "塔吉克",
+    "突尼西亞",
+    "土耳其",
+    "台灣",
+    "坦尚尼亞",
+    "烏克蘭",
+    "烏干達",
+    "美國",
+    "烏拉圭",
+    "烏茲別克",
+    "委內瑞拉",
+    "越南",
+];
+
+const ROM_COUNTRY_NAMES_VI: [&str; ROM_COUNTRY_COUNT] = [
+    "Các Tiểu Vương quốc Ả Rập Thống nhất",
+    "Armenia",
+    "Argentina",
+    "Áo",
+    "Australia",
+    "Azerbaijan",
+    "Bỉ",
+    "Bulgaria",
+    "Bahrain",
+    "Brazil",
+    "Canada",
+    "Thụy Sĩ",
+    "Chile",
+    "Trung Quốc",
+    "Colombia",
+    "Costa Rica",
+    "Síp",
+    "Séc",
+    "Đức",
+    "Đan Mạch",
+    "Ecuador",
+    "Estonia",
+    "Ai Cập",
+    "Tây Ban Nha",
+    "Phần Lan",
+    "Pháp",
+    "Vương quốc Anh",
+    "Georgia",
+    "Ghana",
+    "Hy Lạp",
+    "Guatemala",
+    "Đặc khu Hành chính Hồng Kông, Trung Quốc",
+    "Croatia",
+    "Hungary",
+    "Indonesia",
+    "Israel",
+    "Ấn Độ",
+    "Iceland",
+    "Italy",
+    "Jordan",
+    "Nhật Bản",
+    "Kenya",
+    "Kyrgyzstan",
+    "Hàn Quốc",
+    "Kuwait",
+    "Kazakhstan",
+    "Li-băng",
+    "Litva",
+    "Latvia",
+    "Ma-rốc",
+    "Moldova",
+    "Mexico",
+    "Malaysia",
+    "Mozambique",
+    "Nigeria",
+    "Hà Lan",
+    "Na Uy",
+    "New Zealand",
+    "Oman",
+    "Panama",
+    "Peru",
+    "Philippines",
+    "Pakistan",
+    "Ba Lan",
+    "Bồ Đào Nha",
+    "Qatar",
+    "Romania",
+    "Serbia",
+    "Nga",
+    "Ả Rập Xê-út",
+    "Thụy Điển",
+    "Singapore",
+    "Slovenia",
+    "Slovakia",
+    "El Salvador",
+    "Thái Lan",
+    "Tajikistan",
+    "Tunisia",
+    "Thổ Nhĩ Kỳ",
+    "Đài Loan",
+    "Tanzania",
+    "Ukraina",
+    "Uganda",
+    "Hoa Kỳ",
+    "Uruguay",
+    "Uzbekistan",
+    "Venezuela",
+    "Việt Nam",
+];
+
+const ROM_COUNTRY_NAMES_EL: [&str; ROM_COUNTRY_COUNT] = [
+    "Ηνωμένα Αραβικά Εμιράτα",
+    "Αρμενία",
+    "Αργεντινή",
+    "Αυστρία",
+    "Αυστραλία",
+    "Αζερμπαϊτζάν",
+    "Βέλγιο",
+    "Βουλγαρία",
+    "Μπαχρέιν",
+    "Βραζιλία",
+    "Καναδάς",
+    "Ελβετία",
+    "Χιλή",
+    "Κίνα",
+    "Κολομβία",
+    "Κόστα Ρίκα",
+    "Κύπρος",
+    "Τσεχία",
+    "Γερμανία",
+    "Δανία",
+    "Ισημερινός",
+    "Εσθονία",
+    "Αίγυπτος",
+    "Ισπανία",
+    "Φινλανδία",
+    "Γαλλία",
+    "Ηνωμένο Βασίλειο",
+    "Γεωργία",
+    "Γκάνα",
+    "Ελλάδα",
+    "Γουατεμάλα",
+    "Χονγκ Κονγκ ΕΔΠ Κίνας",
+    "Κροατία",
+    "Ουγγαρία",
+    "Ινδονησία",
+    "Ισραήλ",
+    "Ινδία",
+    "Ισλανδία",
+    "Ιταλία",
+    "Ιορδανία",
+    "Ιαπωνία",
+    "Κένυα",
+    "Κιργιστάν",
+    "Νότια Κορέα",
+    "Κουβέιτ",
+    "Καζακστάν",
+    "Λίβανος",
+    "Λιθουανία",
+    "Λετονία",
+    "Μαρόκο",
+    "Μολδαβία",
+    "Μεξικό",
+    "Μαλαισία",
+    "Μοζαμβίκη",
+    "Νιγηρία",
+    "Κάτω Χώρες",
+    "Νορβηγία",
+    "Νέα Ζηλανδία",
+    "Ομάν",
+    "Παναμάς",
+    "Περού",
+    "Φιλιππίνες",
+    "Πακιστάν",
+    "Πολωνία",
+    "Πορτογαλία",
+    "Κατάρ",
+    "Ρουμανία",
+    "Σερβία",
+    "Ρωσία",
+    "Σαουδική Αραβία",
+    "Σουηδία",
+    "Σιγκαπούρη",
+    "Σλοβενία",
+    "Σλοβακία",
+    "Ελ Σαλβαδόρ",
+    "Ταϊλάνδη",
+    "Τατζικιστάν",
+    "Τυνησία",
+    "Τουρκία",
+    "Ταϊβάν",
+    "Τανζανία",
+    "Ουκρανία",
+    "Ουγκάντα",
+    "Ηνωμένες Πολιτείες",
+    "Ουρουγουάη",
+    "Ουζμπεκιστάν",
+    "Βενεζουέλα",
+    "Βιετνάμ",
+];
+
+const ROM_COUNTRY_NAMES_HI: [&str; ROM_COUNTRY_COUNT] = [
+    "संयुक्त अरब अमीरात",
+    "आर्मेनिया",
+    "अर्जेंटीना",
+    "ऑस्ट्रिया",
+    "ऑस्ट्रेलिया",
+    "अज़रबैजान",
+    "बेल्जियम",
+    "बुल्गारिया",
+    "बहरीन",
+    "ब्राज़ील",
+    "कनाडा",
+    "स्विट्ज़रलैंड",
+    "चिली",
+    "चीन",
+    "कोलंबिया",
+    "कोस्टारिका",
+    "साइप्रस",
+    "चेकिया",
+    "जर्मनी",
+    "डेनमार्क",
+    "इक्वाडोर",
+    "एस्टोनिया",
+    "मिस्र",
+    "स्पेन",
+    "फ़िनलैंड",
+    "फ़्रांस",
+    "यूनाइटेड किंगडम",
+    "जॉर्जिया",
+    "घाना",
+    "यूनान",
+    "ग्वाटेमाला",
+    "हाँग काँग (चीन विशेष प्रशासनिक क्षेत्र)",
+    "क्रोएशिया",
+    "हंगरी",
+    "इंडोनेशिया",
+    "इज़राइल",
+    "भारत",
+    "आइसलैंड",
+    "इटली",
+    "जॉर्डन",
+    "जापान",
+    "केन्या",
+    "किर्गिज़स्तान",
+    "दक्षिण कोरिया",
+    "कुवैत",
+    "कज़ाखस्तान",
+    "लेबनान",
+    "लिथुआनिया",
+    "लातविया",
+    "मोरक्को",
+    "मॉल्डोवा",
+    "मैक्सिको",
+    "मलेशिया",
+    "मोज़ांबिक",
+    "नाइजीरिया",
+    "नीदरलैंड",
+    "नॉर्वे",
+    "न्यूज़ीलैंड",
+    "ओमान",
+    "पनामा",
+    "पेरू",
+    "फ़िलिपींस",
+    "पाकिस्तान",
+    "पोलैंड",
+    "पुर्तगाल",
+    "क़तर",
+    "रोमानिया",
+    "सर्बिया",
+    "रूस",
+    "सऊदी अरब",
+    "स्वीडन",
+    "सिंगापुर",
+    "स्लोवेनिया",
+    "स्लोवाकिया",
+    "अल सल्वाडोर",
+    "थाईलैंड",
+    "ताजिकिस्तान",
+    "ट्यूनीशिया",
+    "तुर्किये",
+    "ताइवान",
+    "तंज़ानिया",
+    "यूक्रेन",
+    "युगांडा",
+    "संयुक्त राज्य",
+    "उरूग्वे",
+    "उज़्बेकिस्तान",
+    "वेनेज़ुएला",
+    "वियतनाम",
+];
+
+const ROM_COUNTRY_NAMES_KA: [&str; ROM_COUNTRY_COUNT] = [
+    "არაბთა გაერთიანებული საამიროები",
+    "სომხეთი",
+    "არგენტინა",
+    "ავსტრია",
+    "ავსტრალია",
+    "აზერბაიჯანი",
+    "ბელგია",
+    "ბულგარეთი",
+    "ბაჰრეინი",
+    "ბრაზილია",
+    "კანადა",
+    "შვეიცარია",
+    "ჩილე",
+    "ჩინეთი",
+    "კოლუმბია",
+    "კოსტა-რიკა",
+    "კვიპროსი",
+    "ჩეხეთი",
+    "გერმანია",
+    "დანია",
+    "ეკვადორი",
+    "ესტონეთი",
+    "ეგვიპტე",
+    "ესპანეთი",
+    "ფინეთი",
+    "საფრანგეთი",
+    "გაერთიანებული სამეფო",
+    "საქართველო",
+    "განა",
+    "საბერძნეთი",
+    "გვატემალა",
+    "ჰონკონგის სპეციალური ადმინისტრაციული რეგიონი, ჩინეთი",
+    "ხორვატია",
+    "უნგრეთი",
+    "ინდონეზია",
+    "ისრაელი",
+    "ინდოეთი",
+    "ისლანდია",
+    "იტალია",
+    "იორდანია",
+    "იაპონია",
+    "კენია",
+    "ყირგიზეთი",
+    "სამხრეთ კორეა",
+    "ქუვეითი",
+    "ყაზახეთი",
+    "ლიბანი",
+    "ლიეტუვა",
+    "ლატვია",
+    "მაროკო",
+    "მოლდოვა",
+    "მექსიკა",
+    "მალაიზია",
+    "მოზამბიკი",
+    "ნიგერია",
+    "ნიდერლანდები",
+    "ნორვეგია",
+    "ახალი ზელანდია",
+    "ომანი",
+    "პანამა",
+    "პერუ",
+    "ფილიპინები",
+    "პაკისტანი",
+    "პოლონეთი",
+    "პორტუგალია",
+    "კატარი",
+    "რუმინეთი",
+    "სერბეთი",
+    "რუსეთი",
+    "საუდის არაბეთი",
+    "შვედეთი",
+    "სინგაპური",
+    "სლოვენია",
+    "სლოვაკეთი",
+    "სალვადორი",
+    "ტაილანდი",
+    "ტაჯიკეთი",
+    "ტუნისი",
+    "თურქეთი",
+    "ტაივანი",
+    "ტანზანია",
+    "უკრაინა",
+    "უგანდა",
+    "ამერიკის შეერთებული შტატები",
+    "ურუგვაი",
+    "უზბეკეთი",
+    "ვენესუელა",
+    "ვიეტნამი",
+];
+
+const ROM_COUNTRY_NAMES_NL: [&str; ROM_COUNTRY_COUNT] = [
+    "Verenigde Arabische Emiraten",
+    "Armenië",
+    "Argentinië",
+    "Oostenrijk",
+    "Australië",
+    "Azerbeidzjan",
+    "België",
+    "Bulgarije",
+    "Bahrein",
+    "Brazilië",
+    "Canada",
+    "Zwitserland",
+    "Chili",
+    "China",
+    "Colombia",
+    "Costa Rica",
+    "Cyprus",
+    "Tsjechië",
+    "Duitsland",
+    "Denemarken",
+    "Ecuador",
+    "Estland",
+    "Egypte",
+    "Spanje",
+    "Finland",
+    "Frankrijk",
+    "Verenigd Koninkrijk",
+    "Georgië",
+    "Ghana",
+    "Griekenland",
+    "Guatemala",
+    "Hongkong SAR van China",
+    "Kroatië",
+    "Hongarije",
+    "Indonesië",
+    "Israël",
+    "India",
+    "IJsland",
+    "Italië",
+    "Jordanië",
+    "Japan",
+    "Kenia",
+    "Kirgizië",
+    "Zuid-Korea",
+    "Koeweit",
+    "Kazachstan",
+    "Libanon",
+    "Litouwen",
+    "Letland",
+    "Marokko",
+    "Moldavië",
+    "Mexico",
+    "Maleisië",
+    "Mozambique",
+    "Nigeria",
+    "Nederland",
+    "Noorwegen",
+    "Nieuw-Zeeland",
+    "Oman",
+    "Panama",
+    "Peru",
+    "Filipijnen",
+    "Pakistan",
+    "Polen",
+    "Portugal",
+    "Qatar",
+    "Roemenië",
+    "Servië",
+    "Rusland",
+    "Saoedi-Arabië",
+    "Zweden",
+    "Singapore",
+    "Slovenië",
+    "Slowakije",
+    "El Salvador",
+    "Thailand",
+    "Tadzjikistan",
+    "Tunesië",
+    "Turkije",
+    "Taiwan",
+    "Tanzania",
+    "Oekraïne",
+    "Oeganda",
+    "Verenigde Staten",
+    "Uruguay",
+    "Oezbekistan",
+    "Venezuela",
+    "Vietnam",
+];
+
+const ROM_COUNTRY_NAMES_AR: [&str; ROM_COUNTRY_COUNT] = [
+    "الإمارات العربية المتحدة",
+    "أرمينيا",
+    "الأرجنتين",
+    "النمسا",
+    "أستراليا",
+    "أذربيجان",
+    "بلجيكا",
+    "بلغاريا",
+    "البحرين",
+    "البرازيل",
+    "كندا",
+    "سويسرا",
+    "تشيلي",
+    "الصين",
+    "كولومبيا",
+    "كوستاريكا",
+    "قبرص",
+    "التشيك",
+    "ألمانيا",
+    "الدانمرك",
+    "الإكوادور",
+    "إستونيا",
+    "مصر",
+    "إسبانيا",
+    "فنلندا",
+    "فرنسا",
+    "المملكة المتحدة",
+    "جورجيا",
+    "غانا",
+    "اليونان",
+    "غواتيمالا",
+    "هونغ كونغ الصينية (منطقة إدارية خاصة)",
+    "كرواتيا",
+    "هنغاريا",
+    "إندونيسيا",
+    "إسرائيل",
+    "الهند",
+    "آيسلندا",
+    "إيطاليا",
+    "الأردن",
+    "اليابان",
+    "كينيا",
+    "قيرغيزستان",
+    "كوريا الجنوبية",
+    "الكويت",
+    "كازاخستان",
+    "لبنان",
+    "ليتوانيا",
+    "لاتفيا",
+    "المغرب",
+    "مولدوفا",
+    "المكسيك",
+    "ماليزيا",
+    "موزمبيق",
+    "نيجيريا",
+    "هولندا",
+    "النرويج",
+    "نيوزيلندا",
+    "عُمان",
+    "بنما",
+    "بيرو",
+    "الفلبين",
+    "باكستان",
+    "بولندا",
+    "البرتغال",
+    "قطر",
+    "رومانيا",
+    "صربيا",
+    "روسيا",
+    "المملكة العربية السعودية",
+    "السويد",
+    "سنغافورة",
+    "سلوفينيا",
+    "سلوفاكيا",
+    "السلفادور",
+    "تايلاند",
+    "طاجيكستان",
+    "تونس",
+    "تركيا",
+    "تايوان",
+    "تنزانيا",
+    "أوكرانيا",
+    "أوغندا",
+    "الولايات المتحدة",
+    "أورغواي",
+    "أوزبكستان",
+    "فنزويلا",
+    "فيتنام",
+];
+
+const ROM_COUNTRY_NAMES_ES: [&str; ROM_COUNTRY_COUNT] = [
+    "Emiratos Árabes Unidos",
+    "Armenia",
+    "Argentina",
+    "Austria",
+    "Australia",
+    "Azerbaiyán",
+    "Bélgica",
+    "Bulgaria",
+    "Baréin",
+    "Brasil",
+    "Canadá",
+    "Suiza",
+    "Chile",
+    "China",
+    "Colombia",
+    "Costa Rica",
+    "Chipre",
+    "Chequia",
+    "Alemania",
+    "Dinamarca",
+    "Ecuador",
+    "Estonia",
+    "Egipto",
+    "España",
+    "Finlandia",
+    "Francia",
+    "Reino Unido",
+    "Georgia",
+    "Ghana",
+    "Grecia",
+    "Guatemala",
+    "RAE de Hong Kong (China)",
+    "Croacia",
+    "Hungría",
+    "Indonesia",
+    "Israel",
+    "India",
+    "Islandia",
+    "Italia",
+    "Jordania",
+    "Japón",
+    "Kenia",
+    "Kirguistán",
+    "Corea del Sur",
+    "Kuwait",
+    "Kazajistán",
+    "Líbano",
+    "Lituania",
+    "Letonia",
+    "Marruecos",
+    "Moldavia",
+    "México",
+    "Malasia",
+    "Mozambique",
+    "Nigeria",
+    "Países Bajos",
+    "Noruega",
+    "Nueva Zelanda",
+    "Omán",
+    "Panamá",
+    "Perú",
+    "Filipinas",
+    "Pakistán",
+    "Polonia",
+    "Portugal",
+    "Catar",
+    "Rumanía",
+    "Serbia",
+    "Rusia",
+    "Arabia Saudí",
+    "Suecia",
+    "Singapur",
+    "Eslovenia",
+    "Eslovaquia",
+    "El Salvador",
+    "Tailandia",
+    "Tayikistán",
+    "Túnez",
+    "Turquía",
+    "Taiwán",
+    "Tanzania",
+    "Ucrania",
+    "Uganda",
+    "Estados Unidos",
+    "Uruguay",
+    "Uzbekistán",
+    "Venezuela",
+    "Vietnam",
+];
+
+fn localized_country_name(index: usize, language: LanguageOption) -> &'static str {
+    match language {
+        LanguageOption::English => ROM_COUNTRY_NAMES_EN[index],
+        LanguageOption::Korean => ROM_COUNTRY_NAMES_KO[index],
+        LanguageOption::Russian => ROM_COUNTRY_NAMES_RU[index],
+        LanguageOption::Japanese => ROM_COUNTRY_NAMES_JA[index],
+        LanguageOption::TraditionalChinese => ROM_COUNTRY_NAMES_ZH_TW[index],
+        LanguageOption::Vietnamese => ROM_COUNTRY_NAMES_VI[index],
+        LanguageOption::Greek => ROM_COUNTRY_NAMES_EL[index],
+        LanguageOption::Hindi => ROM_COUNTRY_NAMES_HI[index],
+        LanguageOption::Georgian => ROM_COUNTRY_NAMES_KA[index],
+        LanguageOption::Dutch => ROM_COUNTRY_NAMES_NL[index],
+        LanguageOption::Arabic => ROM_COUNTRY_NAMES_AR[index],
+        LanguageOption::Spanish => ROM_COUNTRY_NAMES_ES[index],
+    }
+}
+
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 enum Message {
     Noop,
     SelectImageFolder,
@@ -3916,6 +6002,7 @@ enum Message {
     StartReinstallWipe,
     BackupProinfo,
     InstallMtkDriver,
+    InstallVcRuntime,
     DrainLiveEvents,
     ExportLog,
     ClearLog,
@@ -3949,6 +6036,7 @@ enum Message {
     OpenFirmwareDownload,
     OpenQna,
     OpenDeveloperYoutube,
+    OpenProgramVideos,
     OpenDonate,
     OpenFeedback,
     CheckProgramUpdate,
@@ -4154,6 +6242,8 @@ impl App {
         rom_firmware_error: None,
         rom_mtk_driver_installed: None,
         rom_mtk_driver_error: None,
+        rom_vc_runtime_status: None,
+        rom_vc_runtime_error: None,
 
         live_rx: None,
         progress_line_indices: HashMap::new(),
@@ -4240,63 +6330,6 @@ impl App {
             ),
         )
     }
-
-#[allow(dead_code)]
-fn rom_install_slide_content() -> Element<'static, Message> {
-    column![
-        text("PRC/ROW 설치 안내")
-            .size(18)
-            .font(lpm_bold_font())
-            .wrapping(iced::widget::text::Wrapping::None),
-        text("PRC ↔ ROW 전환 작업입니다.")
-            .size(13)
-            .wrapping(iced::widget::text::Wrapping::None),
-        text("데이터가 초기화되므로 백업 후 진행해주세요.")
-            .size(13)
-            .wrapping(iced::widget::text::Wrapping::None),
-    ]
-    .spacing(10)
-    .width(Length::Fixed(ROM_CARD_EXPAND_WIDTH - 32.0))
-    .into()
-}
-
-#[allow(dead_code)]
-fn rom_update_slide_content() -> Element<'static, Message> {
-    column![
-        text("ROW(글로벌롬) 업데이트 안내")
-            .size(18)
-            .font(lpm_bold_font())
-            .wrapping(iced::widget::text::Wrapping::None),
-        text("ROW 글로벌롬 업데이트 작업입니다.")
-            .size(13)
-            .wrapping(iced::widget::text::Wrapping::None),
-        text("데이터 삭제 없이 버전을 업데이트합니다.")
-            .size(13)
-            .wrapping(iced::widget::text::Wrapping::None),
-    ]
-    .spacing(10)
-    .width(Length::Fixed(ROM_CARD_EXPAND_WIDTH - 32.0))
-    .into()
-}
-
-#[allow(dead_code)]
-fn rom_reinstall_slide_content() -> Element<'static, Message> {
-    column![
-        text("기기 복구 안내")
-            .size(18)
-            .font(lpm_bold_font())
-            .wrapping(iced::widget::text::Wrapping::None),
-        text("기기가 켜지지 않거나 무한 재부팅 상태일 때 사용하는 복구 작업입니다.")
-            .size(13)
-            .wrapping(iced::widget::text::Wrapping::None),
-        text("현재 단계에서는 UI만 준비하며, 실제 복구 루틴 연결은 추후 진행합니다.")
-            .size(13)
-            .wrapping(iced::widget::text::Wrapping::None),
-    ]
-    .spacing(10)
-    .width(Length::Fixed(ROM_CARD_EXPAND_WIDTH - 32.0))
-    .into()
-}
 
 fn animate_rom_slide_width(current: f32, velocity: &mut f32, target: f32) -> f32 {
     *velocity = 0.0;
@@ -4587,21 +6620,6 @@ Message::RomCheckLoadingTick => {
 }
 
 Message::RomProceedToRoutine => {
-    match remove_block_firmware_ini_before_routine_select() {
-        Ok(Some(path)) => {
-            self.push_log(format!(
-                "[Image] 최신 block_firmware.ini 다운로드를 위해 기존 파일을 제거했습니다: {}",
-                path.display()
-            ));
-        }
-        Ok(None) => {}
-        Err(err) => {
-            self.push_log(format!(
-                "[경고] 기존 block_firmware.ini 파일 제거 실패: {err}"
-            ));
-        }
-    }
-
     self.rom_show_routine_select = true;
     self.rom_option_target = None;
     self.running_rom_target = None;
@@ -4913,6 +6931,8 @@ Message::DashboardOpenRomFolderSelect => {
     self.rom_firmware_error = None;
     self.rom_mtk_driver_installed = None;
     self.rom_mtk_driver_error = None;
+    self.rom_vc_runtime_status = None;
+    self.rom_vc_runtime_error = None;
     self.rom_show_routine_select = false;
     self.rom_option_target = None;
     self.running_rom_target = None;
@@ -4949,6 +6969,14 @@ Message::OpenQna => {
 Message::OpenDeveloperYoutube => {
     if let Err(err) = open::that("https://www.youtube.com/@dwas_KR?sub_confirmation=1") {
         self.push_log(format!("[설정] 개발자 유튜브 링크 열기 실패: {err}"));
+    }
+
+    Task::none()
+}
+
+Message::OpenProgramVideos => {
+    if let Err(err) = open::that("https://www.youtube.com/@dwas_KR/videos") {
+        self.push_log(format!("[프로그램] 더 많은 프로그램 링크 열기 실패: {err}"));
     }
 
     Task::none()
@@ -5113,8 +7141,9 @@ Message::SidebarAnimTick => {
                     return Task::none();
                 }
 
+                let dialog_title = lpm_translate_owned("LPMBox image 폴더 선택".to_string());
                 let Some(folder) = rfd::FileDialog::new()
-                    .set_title("LPMBox image 폴더 선택")
+                    .set_title(&dialog_title)
                     .pick_folder()
                 else {
                     self.push_log("image 폴더 선택이 취소되었습니다.");
@@ -5126,6 +7155,8 @@ Message::SidebarAnimTick => {
                 self.rom_firmware_error = None;
                 self.rom_mtk_driver_installed = None;
                 self.rom_mtk_driver_error = None;
+                self.rom_vc_runtime_status = None;
+                self.rom_vc_runtime_error = None;
                 self.rom_show_routine_select = false;
                 self.rom_option_target = None;
     self.running_rom_target = None;
@@ -5162,6 +7193,8 @@ Message::SidebarAnimTick => {
                 self.rom_firmware_error = None;
                 self.rom_mtk_driver_installed = None;
                 self.rom_mtk_driver_error = None;
+                self.rom_vc_runtime_status = None;
+                self.rom_vc_runtime_error = None;
                 self.rom_show_routine_select = false;
                 self.reset_rom_check_loading_stack();
 
@@ -5178,6 +7211,8 @@ Message::SidebarAnimTick => {
                     Ok(check) => {
                         self.rom_mtk_driver_installed = check.mtk_driver_installed;
                         self.rom_mtk_driver_error = check.mtk_driver_error;
+                        self.rom_vc_runtime_status = check.vc_runtime_status;
+                        self.rom_vc_runtime_error = check.vc_runtime_error;
 
                         let info = check.firmware;
 
@@ -5221,6 +7256,11 @@ Message::SidebarAnimTick => {
                 self.last_spft_stage = None;
 
                 self.active_log_flow = Some(RuntimeFlowKind::PrcRowInstall);
+                let routine_version_log = lpm_routine_version_log_text(
+                    active_language_option(),
+                    self.rom_firmware_info.as_ref(),
+                );
+                self.push_log(routine_version_log);
                 self.push_log("1번 옵션을 시작합니다: PRC/ROW 펌웨어 설치 [데이터 초기화]");
 
 let selected_country_code = self.rom_option_country_code.clone();
@@ -5255,6 +7295,11 @@ thread::spawn(move || {
         self.last_spft_stage = None;
 
         self.active_log_flow = Some(RuntimeFlowKind::RowUpdate);
+        let routine_version_log = lpm_routine_version_log_text(
+            active_language_option(),
+            self.rom_firmware_info.as_ref(),
+        );
+        self.push_log(routine_version_log);
         self.push_log("2번 옵션을 시작합니다: ROW(글로벌) 펌웨어 업데이트 [데이터 유지]");
 
 let selected_country_code = self.rom_option_country_code.clone();
@@ -5289,6 +7334,11 @@ Message::StartReinstallWipe => {
     self.last_spft_stage = None;
 
     self.active_log_flow = Some(RuntimeFlowKind::DeviceRecovery);
+    let routine_version_log = lpm_routine_version_log_text(
+        active_language_option(),
+        self.rom_firmware_info.as_ref(),
+    );
+    self.push_log(routine_version_log);
     self.push_log("3번 옵션을 시작합니다: 기기 복구 [데이터 초기화]");
 
     let (tx, rx) = mpsc::channel::<ProinfoLiveEvent>();
@@ -5349,6 +7399,30 @@ Message::StartReinstallWipe => {
 
                 thread::spawn(move || {
                     run_mtk_driver_install_flow(tx);
+                });
+
+                Task::none()
+            }
+
+            Message::InstallVcRuntime => {
+                if self.busy {
+                    self.push_log("이미 작업이 진행 중입니다.");
+                    return Task::none();
+                }
+
+                self.busy = true;
+                self.progress_line_indices.clear();
+                self.active_spinners.clear();
+                self.spinner_tick = 0;
+                self.last_spft_stage = None;
+
+                self.push_log("[Runtime] Microsoft Visual C++ x86/x64 런타임 설치를 시작합니다.");
+
+                let (tx, rx) = mpsc::channel::<ProinfoLiveEvent>();
+                self.live_rx = Some(rx);
+
+                thread::spawn(move || {
+                    run_vc_runtime_install_flow(tx);
                 });
 
                 Task::none()
@@ -5949,7 +8023,9 @@ if self.rom_country_popup_open {
     layers.push(self.rom_country_popup_view());
 }
 
-if self.rom_should_show_mtk_driver_popup() {
+if self.rom_should_show_vc_runtime_popup() {
+    layers.push(self.rom_vc_runtime_popup_view());
+} else if self.rom_should_show_mtk_driver_popup() {
     layers.push(self.rom_mtk_driver_popup_view());
 }
 
@@ -6143,28 +8219,26 @@ let info_grid = row![column1, column2, column3]
 
     let action_cards = row![
         self.dashboard_action_card(
-            lpm_rom_routine_ui_text(lang, "PRC ↔ ROW 설치"),
-            "데이터 초기화",
-            "PRC(중국 내수롬) 또는\nROW(글로벌롬)을 설치합니다.",
-            "설치 시작",
+            lpm_dashboard_promo_text(lang, "donate_title"),
+            lpm_dashboard_promo_text(lang, "donate_description"),
+            lpm_dashboard_promo_text(lang, "move_button"),
+            Message::OpenDonate,
+        ),
+        self.dashboard_action_card(
+            lpm_dashboard_promo_text(lang, "start_title"),
+            lpm_dashboard_promo_text(lang, "start_description"),
+            lpm_dashboard_promo_text(lang, "start_button"),
             Message::DashboardOpenRomFolderSelect,
         ),
         self.dashboard_action_card(
-            lpm_rom_routine_ui_text(lang, "ROW(글로벌롬) 업데이트"),
-            "데이터 유지",
-            "ROW(글로벌롬) 버전을\n업데이트 합니다.",
-            "업데이트 시작",
-            Message::DashboardOpenRomFolderSelect,
-        ),
-        self.dashboard_action_card(
-            lpm_rom_routine_ui_text(lang, "기기 복구"),
-            "데이터 초기화",
-            "설치 실패 / 무한 재부팅 / Red State 복구",
-            "복구 시작",
-            Message::DashboardOpenRomFolderSelect,
+            lpm_dashboard_promo_text(lang, "more_title"),
+            lpm_dashboard_promo_text(lang, "more_description"),
+            lpm_dashboard_promo_text(lang, "move_button"),
+            Message::OpenProgramVideos,
         ),
     ]
     .spacing(8)
+    .align_y(iced::Alignment::Start)
     .width(Length::Fill);
 
     container(
@@ -6300,7 +8374,7 @@ let loading_image = iced::widget::image(loading_handle)
         column![
             loading_image,
 
-            text("펌웨어 버전, 플랫폼, 모델명, 필수 partition 유효성, MTK 드라이버 설치 유/무를 검사합니다.")
+            text("펌웨어 버전, 플랫폼, 모델명, 필수 partition 유효성, MTK 드라이버 및 Microsoft Visual C++ 런타임 설치 유/무를 검사합니다.")
                 .size(12)
                 .width(Length::Fill)
                 .align_x(iced::alignment::Horizontal::Center)
@@ -6613,15 +8687,32 @@ fn rom_image_info_dashboard_panel(
         .align_x(iced::alignment::Horizontal::Center);
 
     let validation_log_text = self.lpm_rom_folder_validation_log_text(info);
+    let validation_font_size = match active_language_option() {
+        LanguageOption::Korean => 11.5,
+        LanguageOption::Arabic => 10.0,
+        _ => 10.5,
+    };
+    let validation_alignment = if active_language_option() == LanguageOption::Arabic {
+        iced::alignment::Horizontal::Right
+    } else {
+        iced::alignment::Horizontal::Left
+    };
+    let mut validation_rows = column![].spacing(2).width(Length::Fill);
 
-    let validation_log = container(
-        iced_text(visual_wrap(&validation_log_text, 86))
-            .size(12)
-            .width(Length::Fill),
-    )
-    .width(Length::Fixed(560.0))
-    .padding([8.0, 12.0])
-    .style(lpm_nav_rom_validation_log_style);
+    for line in validation_log_text.lines().filter(|line| !line.trim().is_empty()) {
+        validation_rows = validation_rows.push(
+            iced_text(line.to_string())
+                .size(validation_font_size)
+                .width(Length::Fill)
+                .align_x(validation_alignment)
+                .wrapping(iced::widget::text::Wrapping::Word),
+        );
+    }
+
+    let validation_log = container(validation_rows)
+        .width(Length::Fixed(560.0))
+        .padding([8.0, 12.0])
+        .style(lpm_nav_rom_validation_log_style);
 
     container(
         column![
@@ -6643,41 +8734,7 @@ fn rom_image_info_dashboard_panel(
     .into()
 }
 
-fn build_rom_folder_issue_report(&self, info: &FirmwareInfo) -> RomFolderIssueReport {
-    let state = self.lpm_rom_folder_validation_state(info);
-    let message = self.lpm_rom_folder_validation_log_text(info);
 
-    RomFolderIssueReport {
-        can_proceed: state.can_continue(),
-        image_model_supported: !state.image_model_bad,
-        connected_model_supported: !state.connected_device_unknown
-            && !state.connected_device_bad
-            && !state.connected_device_image_mismatch,
-        battery_ok: !state.battery_low,
-        blocked_firmware_ok: !state.blocked_firmware,
-        message,
-    }
-}
-
-fn rom_folder_diagnostic_log_panel(
-    &self,
-    report: &RomFolderIssueReport,
-) -> Element<'static, Message> {
-    let log_text = visual_wrap(&report.message, ROM_DIAGNOSTIC_LOG_WRAP_CHARS);
-
-    container(
-        iced_text(log_text)
-            .size(11)
-            .width(Length::Fill)
-            .wrapping(iced::widget::text::Wrapping::Word),
-    )
-    .width(Length::Fixed(ROM_DIAGNOSTIC_LOG_WIDTH))
-    .height(Length::Fixed(ROM_DIAGNOSTIC_LOG_HEIGHT))
-    .padding([8.0, 12.0])
-    .clip(true)
-    .style(lpm_nav_rom_diagnostic_log_style)
-    .into()
-}
 
 fn rom_folder_info_item(&self, title: &'static str, value: String) -> Element<'static, Message> {
     let value_text = if value.trim().is_empty() {
@@ -6736,24 +8793,6 @@ fn rom_info_item(&self, title: &'static str, value: String) -> Element<'static, 
     .into()
 }
 
-#[allow(dead_code)]
-fn rom_folder_device_status_ok(&self, info: &FirmwareInfo) -> bool {
-    let image_model = normalize_lenovo_model_for_compare(&info.model);
-    let device_model = normalize_lenovo_model_for_compare(&self.dashboard_info.product_device);
-
-    let model_match = is_supported_lpmbox_model(&image_model)
-        && is_supported_lpmbox_model(&device_model)
-        && is_same_or_convertible_lpmbox_model_pair(&device_model, &image_model);
-
-    let validation_ok = info
-        .scatter_xml_info
-        .as_ref()
-        .map(|scatter| scatter.required_check.all_required_ok)
-        .unwrap_or(false);
-
-    model_match && validation_ok && !info.blocked_firmware_check.blocked
-}
-
 fn lpm_rom_folder_validation_state(
     &self,
     info: &FirmwareInfo,
@@ -6781,6 +8820,11 @@ let battery_low = self
 
 let blocked_firmware = info.blocked_firmware_check.blocked;
 let mtk_driver_missing = self.rom_mtk_driver_installed == Some(false);
+let vc_runtime_missing = self.rom_vc_runtime_error.is_some()
+    || self
+        .rom_vc_runtime_status
+        .map(|status| !status.all_installed())
+        .unwrap_or(false);
 
 LpmRomFolderValidationState {
     image_model_bad,
@@ -6790,6 +8834,7 @@ LpmRomFolderValidationState {
     battery_low,
     blocked_firmware,
     mtk_driver_missing,
+    vc_runtime_missing,
 }
 }
 
@@ -6901,6 +8946,23 @@ fn lpm_rom_folder_validation_issue_lines(
             LanguageOption::Dutch => "Het batterijniveau van het apparaat is te laag.",
             LanguageOption::Arabic => "مستوى بطارية الجهاز منخفض جدًا.",
             LanguageOption::Spanish => "El nivel de batería del dispositivo es demasiado bajo.",
+        }.to_string());
+    }
+
+    if state.vc_runtime_missing {
+        lines.push(match lang {
+            LanguageOption::Korean => "Microsoft Visual C++ x86/x64 런타임 설치가 필요합니다.",
+            LanguageOption::English => "Microsoft Visual C++ x86/x64 Runtime installation is required.",
+            LanguageOption::Russian => "Требуется установка среды выполнения Microsoft Visual C++ x86/x64.",
+            LanguageOption::Japanese => "Microsoft Visual C++ x86/x64 ランタイムのインストールが必要です。",
+            LanguageOption::TraditionalChinese => "需要安裝 Microsoft Visual C++ x86/x64 執行階段。",
+            LanguageOption::Vietnamese => "Cần cài đặt Microsoft Visual C++ Runtime x86/x64.",
+            LanguageOption::Greek => "Απαιτείται εγκατάσταση του Microsoft Visual C++ Runtime x86/x64.",
+            LanguageOption::Hindi => "Microsoft Visual C++ x86/x64 Runtime इंस्टॉल करना आवश्यक है।",
+            LanguageOption::Georgian => "საჭიროა Microsoft Visual C++ x86/x64 Runtime-ის დაყენება.",
+            LanguageOption::Dutch => "Installatie van Microsoft Visual C++ Runtime x86/x64 is vereist.",
+            LanguageOption::Arabic => "يلزم تثبيت Microsoft Visual C++ Runtime لإصداري x86 وx64.",
+            LanguageOption::Spanish => "Se requiere instalar Microsoft Visual C++ Runtime x86/x64.",
         }.to_string());
     }
 
@@ -7029,6 +9091,23 @@ fn lpm_rom_folder_validation_action_text(
         });
     }
 
+    if state.vc_runtime_missing {
+        actions.push(match lang {
+            LanguageOption::Korean => "Microsoft Visual C++ x86/x64 런타임을 설치",
+            LanguageOption::English => "install Microsoft Visual C++ Runtime x86/x64",
+            LanguageOption::Russian => "установите среду выполнения Microsoft Visual C++ x86/x64",
+            LanguageOption::Japanese => "Microsoft Visual C++ x86/x64 ランタイムをインストール",
+            LanguageOption::TraditionalChinese => "安裝 Microsoft Visual C++ x86/x64 執行階段",
+            LanguageOption::Vietnamese => "cài đặt Microsoft Visual C++ Runtime x86/x64",
+            LanguageOption::Greek => "εγκαταστήστε το Microsoft Visual C++ Runtime x86/x64",
+            LanguageOption::Hindi => "Microsoft Visual C++ x86/x64 Runtime इंस्टॉल करें",
+            LanguageOption::Georgian => "დააყენეთ Microsoft Visual C++ x86/x64 Runtime",
+            LanguageOption::Dutch => "installeer Microsoft Visual C++ Runtime x86/x64",
+            LanguageOption::Arabic => "تثبيت Microsoft Visual C++ Runtime لإصداري x86 وx64",
+            LanguageOption::Spanish => "instale Microsoft Visual C++ Runtime x86/x64",
+        });
+    }
+
     if state.mtk_driver_missing {
         actions.push(match lang {
             LanguageOption::Korean => "MTK 드라이버를 설치",
@@ -7091,35 +9170,32 @@ fn lpm_rom_folder_validation_log_text(
         .to_string();
     }
 
-    if issue_lines.len() == 1 {
-        let issue = issue_lines[0].clone();
+    let numbered = issue_lines.len() > 1;
+    let mut output = Vec::new();
 
-if state.connected_device_unknown || state.mtk_driver_missing {
-    return issue;
-}
-
-        let action = self.lpm_rom_folder_validation_action_text(state);
-
-        if action.is_empty() {
-            issue
-        } else {
-            format!("{issue} {action}")
+    for (issue_index, issue) in issue_lines.iter().enumerate() {
+        for (line_index, line) in issue.lines().filter(|line| !line.trim().is_empty()).enumerate() {
+            if numbered && line_index == 0 {
+                output.push(format!("{}) {}", issue_index + 1, line.trim()));
+            } else if numbered {
+                output.push(format!("   {}", line.trim()));
+            } else {
+                output.push(line.trim().to_string());
+            }
         }
-    } else {
-        let mut output = issue_lines
-            .iter()
-            .enumerate()
-            .map(|(index, line)| format!("{}) {}", index + 1, line))
-            .collect::<Vec<_>>();
-
-        let action = self.lpm_rom_folder_validation_action_text(state);
-
-        if !action.is_empty() {
-            output.push(action);
-        }
-
-        output.join("\n")
     }
+
+    let action = self.lpm_rom_folder_validation_action_text(state);
+    if !action.is_empty()
+        && !(issue_lines.len() == 1
+            && (state.connected_device_unknown
+                || state.mtk_driver_missing
+                || state.vc_runtime_missing))
+    {
+        output.push(action);
+    }
+
+    output.join("\n")
 }
 
 fn rom_firmware_error_panel(&self, error: &str) -> Element<'static, Message> {
@@ -7137,85 +9213,6 @@ fn rom_firmware_error_panel(&self, error: &str) -> Element<'static, Message> {
     .width(Length::Fill)
     .padding(12)
     .style(lpm_nav_rom_error_card_style)
-    .into()
-}
-
-#[allow(dead_code)]
-fn rom_firmware_summary_panel(&self, info: &FirmwareInfo) -> Element<'static, Message> {
-    let version = info
-        .version
-        .clone()
-        .unwrap_or_else(|| "알 수 없음".to_string());
-
-    let platform = info
-        .platform
-        .clone()
-        .unwrap_or_else(|| "알 수 없음".to_string());
-
-    let validation = match &info.scatter_xml_info {
-        Some(scatter_xml_info) if scatter_xml_info.required_check.all_required_ok => {
-            "통과".to_string()
-        }
-
-        Some(scatter_xml_info) => {
-            if scatter_xml_info.required_check.missing_partitions.is_empty() {
-                "확인 필요".to_string()
-            } else {
-                format!(
-                    "확인 필요: {}",
-                    scatter_xml_info.required_check.missing_partitions.join(", ")
-                )
-            }
-        }
-
-        None => "확인 불가".to_string(),
-    };
-
-    container(
-        column![
-            text("3단계  펌웨어 검사 결과")
-                .size(14)
-                .font(lpm_bold_font()),
-            row![
-                self.rom_summary_item("모델명", info.model.clone()),
-                self.rom_summary_item("ROM 타입", region_label(info.region).to_string()),
-            ]
-            .spacing(8),
-            row![
-                self.rom_summary_item("펌웨어 버전", version),
-                self.rom_summary_item("플랫폼", platform),
-            ]
-            .spacing(8),
-            self.rom_summary_item("유효성 검사", validation),
-        ]
-        .spacing(8),
-    )
-    .width(Length::Fill)
-    .padding(12)
-    .style(lpm_nav_rom_step_card_style)
-    .into()
-}
-
-#[allow(dead_code)]
-fn rom_summary_item(&self, title: &'static str, value: String) -> Element<'static, Message> {
-    let value_text = if value.trim().is_empty() {
-        "알 수 없음".to_string()
-    } else {
-        compact_text(value.trim(), 36)
-    };
-
-    container(
-        column![
-            text(title)
-                .size(12)
-                .font(lpm_bold_font()),
-            text(value_text).size(12),
-        ]
-        .spacing(2),
-    )
-    .width(Length::Fill)
-    .padding(8)
-    .style(lpm_nav_rom_summary_item_style)
     .into()
 }
 
@@ -7728,9 +9725,10 @@ fn rom_country_popup_view(&self) -> Element<'_, Message> {
     let mut list = column![].spacing(2);
     let mut matched_count = 0usize;
 
-    for entry in ROM_COUNTRY_CODES {
+    for (index, entry) in ROM_COUNTRY_CODES.iter().enumerate() {
         let entry_code = entry.code.to_ascii_lowercase();
-        let entry_name = entry.name.to_ascii_lowercase();
+        let localized_name = localized_country_name(index, self.settings_language);
+        let entry_name = localized_name.to_lowercase();
 
         if !search.is_empty() && !entry_code.contains(&search) && !entry_name.contains(&search) {
             continue;
@@ -7740,7 +9738,7 @@ fn rom_country_popup_view(&self) -> Element<'_, Message> {
 
         let selected = selected_code == Some(entry.code);
         let code = entry.code.to_string();
-        let label = format!("{} — {}", entry.code, entry.name);
+        let label = format!("{} — {}", entry.code, localized_name);
 
         list = list.push(
             button(text(label).size(13))
@@ -7841,6 +9839,68 @@ fn rom_country_popup_view(&self) -> Element<'_, Message> {
     .into()
 }
 
+fn rom_should_show_vc_runtime_popup(&self) -> bool {
+    self.active_nav == NavPage::Rom
+        && self.image_dir.is_some()
+        && self.rom_firmware_info.is_some()
+        && !self.rom_show_routine_select
+        && self.rom_option_target.is_none()
+        && !self.busy
+        && (self.rom_vc_runtime_error.is_some()
+            || self
+                .rom_vc_runtime_status
+                .map(|status| !status.all_installed())
+                .unwrap_or(false))
+}
+
+fn rom_vc_runtime_popup_view(&self) -> Element<'_, Message> {
+    let popup_content = container(
+        column![
+            text("Microsoft Visual C++ 런타임 설치가 필요합니다!")
+                .size(17)
+                .font(lpm_bold_font())
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center)
+                .wrapping(iced::widget::text::Wrapping::Word),
+
+            text("VCRUNTIME140.dll / MSVCP140.dll 오류를 방지하기 위해\nMicrosoft Visual C++ x86(32비트) 및 x64(64비트) 런타임을 설치해주세요.")
+                .size(13)
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center)
+                .wrapping(iced::widget::text::Wrapping::Word),
+
+            button(text("Visual C++ 설치").size(12))
+                .padding([8.0, 18.0])
+                .on_press(Message::InstallVcRuntime),
+        ]
+        .spacing(14)
+        .width(Length::Fill)
+        .align_x(iced::Alignment::Center),
+    )
+    .width(Length::Fixed(390.0))
+    .height(Length::Fixed(196.0))
+    .padding([24.0, 28.0])
+    .style(lpm_nav_mtk_driver_popup_card_style);
+
+    let scrim = container(iced::widget::Space::new())
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(lpm_nav_mtk_driver_popup_scrim_style);
+
+    let centered = container(popup_content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center);
+
+    iced::widget::opaque(
+        iced::widget::Stack::with_children(vec![scrim.into(), centered.into()])
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .into()
+}
+
 fn rom_should_show_mtk_driver_popup(&self) -> bool {
     self.active_nav == NavPage::Rom
         && self.image_dir.is_some()
@@ -7848,6 +9908,11 @@ fn rom_should_show_mtk_driver_popup(&self) -> bool {
         && !self.rom_show_routine_select
         && self.rom_option_target.is_none()
         && !self.busy
+        && !(self.rom_vc_runtime_error.is_some()
+            || self
+                .rom_vc_runtime_status
+                .map(|status| !status.all_installed())
+                .unwrap_or(false))
         && self.rom_mtk_driver_installed == Some(false)
 }
 
@@ -8164,82 +10229,6 @@ if disabled {
 }
 }
 
-#[allow(dead_code)]
-fn rom_routine_start_card(
-    &self,
-    title: &'static str,
-    subtitle: &'static str,
-    description: &'static str,
-    button_label: &'static str,
-    message: Message,
-) -> Element<'static, Message> {
-    container(
-        column![
-            text(title)
-                .size(15)
-                .font(lpm_bold_font())
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center),
-            text(subtitle)
-                .size(12)
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center),
-            text(description)
-                .size(12)
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center),
-            button(text(button_label).size(12)).on_press(message),
-        ]
-        .spacing(7)
-        .width(Length::Fill)
-        .align_x(iced::Alignment::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(145.0))
-    .padding(10)
-    .align_x(iced::alignment::Horizontal::Center)
-    .align_y(iced::alignment::Vertical::Center)
-    .style(lpm_nav_rom_select_card_style)
-    .into()
-}
-
-#[allow(dead_code)]
-fn rom_routine_disabled_card(
-    &self,
-    title: &'static str,
-    subtitle: &'static str,
-    description: &'static str,
-) -> Element<'static, Message> {
-    container(
-        column![
-            text(title)
-                .size(15)
-                .font(lpm_bold_font())
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center),
-            text(subtitle)
-                .size(12)
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center),
-            text(description)
-                .size(12)
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center),
-            button(text("비활성화").size(12)),
-        ]
-        .spacing(7)
-        .width(Length::Fill)
-        .align_x(iced::Alignment::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(145.0))
-    .padding(10)
-    .align_x(iced::alignment::Horizontal::Center)
-    .align_y(iced::alignment::Vertical::Center)
-    .style(lpm_nav_rom_disabled_card_style)
-    .into()
-}
-
 fn dashboard_info_item(&self, title: &str, value: &str) -> Element<'static, Message> {
     let title_text = lpm_translate_owned(title.to_string());
 
@@ -8278,225 +10267,72 @@ fn dashboard_info_item(&self, title: &str, value: &str) -> Element<'static, Mess
 fn dashboard_action_card(
     &self,
     title: &'static str,
-    data_policy: &'static str,
     description: &'static str,
     button_label: &'static str,
     message: Message,
 ) -> Element<'static, Message> {
-    let content = column![
-        text(title)
-            .size(lpm_dashboard_title_size())
-            .font(lpm_bold_font())
-            .width(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Center)
-            .wrapping(iced::widget::text::Wrapping::Word),
-        text(data_policy)
-            .size(lpm_dashboard_body_size())
-            .width(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Center)
-            .wrapping(iced::widget::text::Wrapping::Word),
-        text(description)
-            .size(lpm_dashboard_body_size())
-            .width(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Center)
-            .wrapping(iced::widget::text::Wrapping::Word),
-        button(text(button_label).size(lpm_dashboard_body_size())).on_press(message),
-    ]
-    .spacing(5)
-    .width(Length::Fill)
-    .align_x(iced::Alignment::Center);
+    const DASHBOARD_ACTION_CARD_HEIGHT: f32 = 184.0;
+    const DASHBOARD_ACTION_TITLE_HEIGHT: f32 = 38.0;
+    const DASHBOARD_ACTION_DESCRIPTION_HEIGHT: f32 = 76.0;
+    const DASHBOARD_ACTION_BUTTON_HEIGHT: f32 = 30.0;
 
-    container(content)
-        .width(Length::Fill)
-        .height(Length::Fixed(166.0))
-        .padding(10)
-        .align_x(iced::alignment::Horizontal::Center)
-        .align_y(iced::alignment::Vertical::Center)
-        .style(lpm_nav_dashboard_action_style)
-        .into()
-}
-
-#[allow(dead_code)]
-fn rom_big_action_card(
-    &self,
-    icon_handle: iced::widget::image::Handle,
-    target: RomSlideTarget,
-    title: &'static str,
-    subtitle: &'static str,
-    description: &'static str,
-    message: Message,
-) -> Element<'static, Message> {
-    let icon_slot = container(
-        iced::widget::image(icon_handle)
-            .width(Length::Fixed(132.0))
-            .height(Length::Fixed(132.0)),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(150.0))
-    .align_x(iced::alignment::Horizontal::Center)
-    .align_y(iced::alignment::Vertical::Center);
-
-    let divider_slot = container(
-        container(iced::widget::Space::new())
-            .width(Length::Fixed(250.0))
-            .height(Length::Fixed(1.0))
-            .style(lpm_nav_rom_card_divider_style),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(20.0))
-    .align_x(iced::alignment::Horizontal::Center)
-    .align_y(iced::alignment::Vertical::Center);
-
-    let text_slot = container(
-        column![
-            text(title)
-                .size(25)
-                .font(lpm_bold_font())
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center),
-            text(subtitle)
-                .size(18)
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center),
-            text(description)
-                .size(12)
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center),
-        ]
-        .spacing(10)
-        .width(Length::Fill)
-        .align_x(iced::Alignment::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fixed(122.0))
-    .align_x(iced::alignment::Horizontal::Center)
-    .align_y(iced::alignment::Vertical::Center);
-
-    let base_content = container(
-        column![icon_slot, divider_slot, text_slot]
-            .spacing(0)
-            .width(Length::Fill)
-            .align_x(iced::Alignment::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-.padding(iced::Padding {
-    top: 0.0,
-    right: ROM_ROUTINE_HANDLE_WIDTH + 8.0,
-    bottom: 0.0,
-    left: 16.0,
-})
-    .align_x(iced::alignment::Horizontal::Center)
-    .align_y(iced::alignment::Vertical::Center)
-    .style(lpm_nav_rom_big_card_style);
-
-    let slide_width = match target {
-        RomSlideTarget::Install => self.rom_install_slide_width,
-        RomSlideTarget::Update => self.rom_update_slide_width,
-        RomSlideTarget::Reinstall => self.rom_reinstall_slide_width,
-};
-
-let any_progress = (self
-    .rom_install_slide_width
-    .max(self.rom_update_slide_width)
-    / ROM_CARD_EXPAND_WIDTH)
-    .clamp(0.0, 1.0);
-
-    let dim_overlay = container(iced::widget::Space::new())
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_theme: &Theme| container::Style {
-            background: Some(Background::Color(Color::from_rgba(
-                222.0 / 255.0,
-                225.0 / 255.0,
-                236.0 / 255.0,
-                ROM_DIM_ALPHA * any_progress,
-            ))),
-            border: iced::Border {
-                radius: 14.0.into(),
-                ..iced::Border::default()
-            },
-            ..container::Style::default()
-        });
-
-    let handle_text = match target {
-        RomSlideTarget::Install => ">",
-        RomSlideTarget::Update => "<",
-        RomSlideTarget::Reinstall => ">",
-    };
-
-    let handle_panel = container(
-        text(handle_text)
-            .size(22)
-            .font(lpm_bold_font())
+    let action_button = button(
+        container(text(button_label).size(lpm_dashboard_body_size()))
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(iced::alignment::Horizontal::Center)
             .align_y(iced::alignment::Vertical::Center),
     )
-    .width(Length::Fixed(ROM_CARD_HANDLE_WIDTH))
-    .height(Length::Fill)
-    .align_x(iced::alignment::Horizontal::Center)
-    .align_y(iced::alignment::Vertical::Center)
-    .style(lpm_nav_rom_slide_handle_style);
+    .width(Length::Fixed(104.0))
+    .height(Length::Fixed(DASHBOARD_ACTION_BUTTON_HEIGHT))
+    .padding(0.0)
+    .on_press(message);
 
-    let expanded_content = match target {
-    RomSlideTarget::Install => Self::rom_install_slide_content(),
-    RomSlideTarget::Update => Self::rom_update_slide_content(),
-    RomSlideTarget::Reinstall => Self::rom_reinstall_slide_content(),
-};
-
-let expanded_panel = container(
-    container(expanded_content)
-        .width(Length::Fixed(ROM_CARD_EXPAND_WIDTH))
-        .height(Length::Fill)
-        .padding(16)
-        .align_x(iced::alignment::Horizontal::Left)
-        .align_y(iced::alignment::Vertical::Top),
-)
-.width(Length::Fixed(slide_width))
-.height(Length::Fill)
-.clip(true)
-.style(lpm_nav_rom_slide_expanded_style);
-
-let slide_overlay_content: Element<'static, Message> = match target {
-    RomSlideTarget::Install | RomSlideTarget::Reinstall => row![expanded_panel, handle_panel]
-        .spacing(0)
-        .height(Length::Fill)
-        .into(),
-    RomSlideTarget::Update => row![handle_panel, expanded_panel]
-        .spacing(0)
-        .height(Length::Fill)
-        .into(),
-};
-
-    let slide_overlay = container(slide_overlay_content)
+    let content = column![
+        container(
+            text(title)
+                .size(lpm_dashboard_title_size())
+                .font(lpm_bold_font())
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center)
+                .wrapping(iced::widget::text::Wrapping::Word),
+        )
         .width(Length::Fill)
-        .height(Length::Fill)
-.align_x(match target {
-    RomSlideTarget::Install | RomSlideTarget::Reinstall => iced::alignment::Horizontal::Right,
-    RomSlideTarget::Update => iced::alignment::Horizontal::Left,
-})
-        .align_y(iced::alignment::Vertical::Center);
+        .height(Length::Fixed(DASHBOARD_ACTION_TITLE_HEIGHT))
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center),
+        container(
+            text(description)
+                .size(lpm_dashboard_description_size())
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center)
+                .wrapping(iced::widget::text::Wrapping::Word),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(DASHBOARD_ACTION_DESCRIPTION_HEIGHT))
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center),
+        iced::widget::Space::new()
+            .width(Length::Fill)
+            .height(Length::Fill),
+        container(action_button)
+            .width(Length::Fill)
+            .height(Length::Fixed(DASHBOARD_ACTION_BUTTON_HEIGHT))
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center),
+    ]
+    .spacing(4)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .align_x(iced::Alignment::Center);
 
-    let stacked = iced::widget::Stack::with_children(vec![
-        base_content.into(),
-        dim_overlay.into(),
-        slide_overlay.into(),
-    ])
-    .width(Length::Fixed(ROM_CARD_WIDTH))
-    .height(Length::Fixed(ROM_CARD_HEIGHT));
-
-    let card_button = button(stacked)
-        .padding(0)
-        .width(Length::Fixed(ROM_CARD_WIDTH))
-        .height(Length::Fixed(ROM_CARD_HEIGHT))
-        .on_press(message)
-        .style(lpm_nav_rom_card_button_style);
-
-    iced::widget::mouse_area(card_button)
-        .on_enter(Message::RomCardHoverEnter(target))
-        .on_exit(Message::RomCardHoverExit(target))
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fixed(DASHBOARD_ACTION_CARD_HEIGHT))
+        .padding([10.0, 10.0])
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(lpm_nav_dashboard_action_style)
         .into()
 }
 
@@ -8714,6 +10550,16 @@ ProinfoLiveEvent::Log(message) => {
         self.rom_mtk_driver_error = None;
     }
 
+    if message.contains("[Runtime] Microsoft Visual C++ 런타임 설치 작업이 완료되었습니다.")
+        || message.contains("[Runtime] Microsoft Visual C++ x86/x64 런타임 설치 감지 완료")
+    {
+        self.rom_vc_runtime_status = Some(lpmbox_device::VcRuntimeStatus {
+            x86_installed: true,
+            x64_installed: true,
+        });
+        self.rom_vc_runtime_error = None;
+    }
+
     let flow_completed = is_runtime_flow_completion_log(&message);
 
     if message.contains("[완료]")
@@ -8909,7 +10755,7 @@ fn finalize_spft_stage(&mut self, stage: &str) {
 }
 
     fn push_blocked_firmware_check_logs(&mut self, check: &BlockedFirmwareCheck) {
-        self.push_log(format!("block_firmware.ini 검사: {}", check.message));
+        self.push_log(format!("온라인 차단 펌웨어 규칙 검사: {}", check.message));
 
         if !check.blocked_versions.is_empty() {
             self.push_log(format!(
@@ -9063,56 +10909,22 @@ fn cleanup_external_processes_on_exit() {
     try_kill_spflashtoolv6_for_file_unlock();
 }
 
-fn remove_block_firmware_ini_before_routine_select() -> std::result::Result<Option<PathBuf>, String> {
-    let path = lpmbox_core::app_paths::block_firmware_ini_path();
+fn ensure_block_firmware_rules_for_flow(tx: &mpsc::Sender<ProinfoLiveEvent>) -> bool {
+    let source = lpmbox_firmware::block_firmware_rules_url();
+    let _ = tx.send(ProinfoLiveEvent::Log(format!(
+        "[Image] 온라인 차단 펌웨어 규칙을 확인합니다: {source}"
+    )));
 
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    std::fs::remove_file(&path)
-        .map_err(|err| format!("{} / {err}", path.display()))?;
-
-    Ok(Some(path))
-}
-
-fn ensure_block_firmware_ini_for_flow(tx: &mpsc::Sender<ProinfoLiveEvent>) -> bool {
-    let _ = tx.send(ProinfoLiveEvent::Log(
-        "[Image] block_firmware.ini 파일을 다운로드 합니다.".to_string(),
-    ));
-
-    match lpmbox_firmware::refresh_block_firmware_ini() {
-        Ok(path) => {
-            if !path.is_file() {
-                let _ = tx.send(ProinfoLiveEvent::Error(format!(
-                    "block_firmware.ini 감지 실패: {}",
-                    path.display()
-                )));
-                return false;
-            }
-
-            let size = std::fs::metadata(&path)
-                .map(|metadata| metadata.len())
-                .unwrap_or(0);
-
-            if size == 0 {
-                let _ = tx.send(ProinfoLiveEvent::Error(format!(
-                    "block_firmware.ini 감지 실패: 파일 크기가 0입니다: {}",
-                    path.display()
-                )));
-                return false;
-            }
-
+    match lpmbox_firmware::refresh_block_firmware_rules() {
+        Ok(size) => {
             let _ = tx.send(ProinfoLiveEvent::Log(format!(
-                "[Image] block_firmware.ini 다운로드 및 감지 완료: {}",
-                path.display()
+                "[Image] 온라인 차단 펌웨어 규칙 확인 완료: {size} bytes"
             )));
             true
         }
-
         Err(err) => {
             let _ = tx.send(ProinfoLiveEvent::Error(format!(
-                "block_firmware.ini 다운로드 실패: {err}"
+                "온라인 차단 펌웨어 규칙 확인 실패: {err}"
             )));
             false
         }
@@ -9124,7 +10936,7 @@ fn run_convert_wipe_flow(
     selected_country_code: Option<String>,
     tx: mpsc::Sender<ProinfoLiveEvent>,
 ) {
-    if !ensure_block_firmware_ini_for_flow(&tx) {
+    if !ensure_block_firmware_rules_for_flow(&tx) {
         return;
     }
 
@@ -9247,7 +11059,7 @@ fn run_convert_wipe_flow(
     ));
 
     let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|preloader_detect|[Port] PreLoader 포트 감지 중... |".to_string(),
+        internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 중... │"),
     ));
 
     let detect = lpmbox_device::detect_preloader_until_timeout(30);
@@ -9261,7 +11073,7 @@ fn run_convert_wipe_flow(
     }
 
     let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|preloader_detect|[Port] PreLoader 포트 감지 완료".to_string(),
+        internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 완료"),
     ));
 
     let _ = tx.send(ProinfoLiveEvent::Log(
@@ -9291,7 +11103,7 @@ fn run_row_update_keep_data_flow(
     selected_country_code: Option<String>,
     tx: mpsc::Sender<ProinfoLiveEvent>,
 ) {
-    if !ensure_block_firmware_ini_for_flow(&tx) {
+    if !ensure_block_firmware_rules_for_flow(&tx) {
         return;
     }
 
@@ -9408,7 +11220,7 @@ fn run_row_update_keep_data_flow(
     ));
 
     let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|preloader_detect|[Port] PreLoader 포트 감지 중... |".to_string(),
+        internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 중... │"),
     ));
 
     let detect = lpmbox_device::detect_preloader_until_timeout(30);
@@ -9422,7 +11234,7 @@ fn run_row_update_keep_data_flow(
     }
 
     let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|preloader_detect|[Port] PreLoader 포트 감지 완료".to_string(),
+        internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 완료"),
     ));
 
     let _ = tx.send(ProinfoLiveEvent::Log(
@@ -9453,7 +11265,7 @@ fn run_reinstall_wipe_flow(image_dir: PathBuf, tx: mpsc::Sender<ProinfoLiveEvent
         "[1단계] 사전 파일 준비".to_string(),
     ));
 
-    if !ensure_block_firmware_ini_for_flow(&tx) {
+    if !ensure_block_firmware_rules_for_flow(&tx) {
         return;
     }
 
@@ -9551,10 +11363,12 @@ fn run_reinstall_wipe_flow(image_dir: PathBuf, tx: mpsc::Sender<ProinfoLiveEvent
         "[6단계] MediaTek PreLoader 포트 감지 (제한 시간 30초)".to_string(),
     ));
 
-    lpmbox_device::trigger_rom_install_reboot_commands(|_message| {});
+    lpmbox_device::trigger_rom_install_reboot_commands(|message| {
+        let _ = tx.send(ProinfoLiveEvent::Log(message));
+    });
 
     let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|preloader_detect|[Port] PreLoader 포트 감지 중... (30초) |".to_string(),
+        internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 중... (30초) │"),
     ));
 
     let detect = lpmbox_device::detect_preloader_until_timeout(30);
@@ -9568,7 +11382,7 @@ fn run_reinstall_wipe_flow(image_dir: PathBuf, tx: mpsc::Sender<ProinfoLiveEvent
     }
 
     let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|preloader_detect|[Port] PreLoader 포트 감지 완료".to_string(),
+        internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 완료"),
     ));
 
     let _ = tx.send(ProinfoLiveEvent::Log(
@@ -9631,12 +11445,32 @@ fn run_mtk_driver_install_flow(tx: mpsc::Sender<ProinfoLiveEvent>) {
     }
 }
 
+fn run_vc_runtime_install_flow(tx: mpsc::Sender<ProinfoLiveEvent>) {
+    let result = lpmbox_device::install_vc_runtimes(|message| {
+        let _ = tx.send(ProinfoLiveEvent::Log(message));
+    });
+
+    match result {
+        Ok(()) => {
+            let _ = tx.send(ProinfoLiveEvent::Log(
+                "[Runtime] Microsoft Visual C++ 런타임 설치 작업이 완료되었습니다."
+                    .to_string(),
+            ));
+        }
+        Err(err) => {
+            let _ = tx.send(ProinfoLiveEvent::Error(format!(
+                "Microsoft Visual C++ 런타임 설치 실패: {err}"
+            )));
+        }
+    }
+}
+
 fn run_country_reset_flow(
     image_dir: PathBuf,
     selected_country_code: String,
     tx: mpsc::Sender<ProinfoLiveEvent>,
 ) {
-    if !ensure_block_firmware_ini_for_flow(&tx) {
+    if !ensure_block_firmware_rules_for_flow(&tx) {
         return;
     }
 
@@ -9727,8 +11561,7 @@ fn run_country_reset_flow(
     ));
 
     let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|country_reset_preloader_detect|[Port] PreLoader 포트 감지 중... (30초) |"
-            .to_string(),
+        internal_spinner_message("country_reset_preloader_detect", "[Port] PreLoader 포트 감지 중... (30초) │"),
     ));
 
     let detect = lpmbox_device::detect_preloader_until_timeout(30);
@@ -9742,7 +11575,7 @@ fn run_country_reset_flow(
     }
 
     let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|country_reset_preloader_detect|[Port] PreLoader 포트 감지 완료".to_string(),
+        internal_spinner_message("country_reset_preloader_detect", "[Port] PreLoader 포트 감지 완료"),
     ));
 
     let _ = tx.send(ProinfoLiveEvent::Log(
@@ -9904,18 +11737,12 @@ fn run_optional_country_proinfo_backup(
         "[backup] 국가 코드 변경을 위해 proinfo 파티션을 백업합니다.".to_string(),
     ));
 
-    let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|backup_reboot_device|[backup] 기기를 재시작합니다... |".to_string(),
-    ));
-
-    lpmbox_device::trigger_rom_install_reboot_commands(|_message| {});
+    lpmbox_device::trigger_rom_install_reboot_commands(|message| {
+        let _ = tx.send(ProinfoLiveEvent::Log(message));
+    });
 
     let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|backup_reboot_device|[backup] 기기를 재시작합니다...".to_string(),
-    ));
-
-    let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|backup_preloader_detect|[backup] PreLoader 포트 감지 중... |".to_string(),
+        internal_spinner_message("backup_preloader_detect", "[backup] PreLoader 포트 감지 중... │"),
     ));
 
     let detect = lpmbox_device::detect_preloader_until_timeout(30);
@@ -9929,7 +11756,7 @@ fn run_optional_country_proinfo_backup(
     }
 
     let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|backup_preloader_detect|[backup] PreLoader 포트 감지 완료".to_string(),
+        internal_spinner_message("backup_preloader_detect", "[backup] PreLoader 포트 감지 완료"),
     ));
 
     let readback_result = lpmbox_spft::execute_proinfo_readback_streaming(image_dir, |event| {
@@ -10088,16 +11915,15 @@ fn wait_with_backup_spinner(
     for tick in 0..total_ticks {
         let frame = UI_SPINNER_FRAMES[(tick as usize) % UI_SPINNER_FRAMES.len()];
 
-        let _ = tx.send(ProinfoLiveEvent::Log(format!(
-            "__SPINNER__|{key}|{message} {frame}"
+        let _ = tx.send(ProinfoLiveEvent::Log(internal_spinner_message(
+            key,
+            &format!("{message} {frame}"),
         )));
 
         thread::sleep(Duration::from_millis(100));
     }
 
-    let _ = tx.send(ProinfoLiveEvent::Log(format!(
-        "__SPINNER__|{key}|{message}"
-    )));
+    let _ = tx.send(ProinfoLiveEvent::Log(internal_spinner_message(key, message)));
 }
 
 #[cfg(windows)]
@@ -10314,52 +12140,7 @@ fn ascii_token_to_string(token: &[u8]) -> String {
     String::from_utf8_lossy(token).to_string()
 }
 
-fn copy_backup_proinfo_to_flash_paths(
-    image_dir: &Path,
-    proinfo_backup_path: &Path,
-) -> std::result::Result<(), String> {
-    let image_proinfo = image_dir.join("proinfo");
 
-    std::fs::copy(proinfo_backup_path, &image_proinfo)
-        .map_err(|err| format!("{} / {err}", image_proinfo.display()))?;
-
-    Ok(())
-}
-
-fn validate_device_and_image_for_convert_wipe(
-    device: &lpmbox_device::AdbDeviceProbe,
-    output: &FlashPreparedOutput,
-) -> Result<String, String> {
-    let plan = &output.plan;
-
-    if !device.platform.eq_ignore_ascii_case(&plan.platform) {
-        return Err(image_folder_mismatch_message());
-    }
-
-    let device_model = normalize_lenovo_model_for_compare(&device.model);
-    let image_model = normalize_lenovo_model_for_compare(&plan.model);
-
-    if !is_same_or_convertible_lpmbox_model_pair(&device_model, &image_model) {
-        return Err(image_folder_mismatch_message());
-    }
-
-    match (device.region, plan.image_region) {
-        (RomRegion::Prc, RomRegion::Row) | (RomRegion::Row, RomRegion::Prc) => {
-            Ok(format!(
-                "[Image] 기기에 {}을 설치합니다.",
-                region_label(plan.image_region)
-            ))
-        }
-        (RomRegion::Row, RomRegion::Row) => Err(
-            "[Image] 2. ROW(글로벌롬) 펌웨어 업데이트 [데이터 유지]를 시도해주세요."
-                .to_string(),
-        ),
-        (RomRegion::Prc, RomRegion::Prc) => Err(
-            "[Image] LPMBOX는 PRC(중국 내수롬) 업데이트를 지원하지 않습니다.".to_string(),
-        ),
-        _ => Err(image_folder_mismatch_message()),
-    }
-}
 
 fn image_folder_mismatch_message() -> String {
     "[Image] 기기에 맞는 image 폴더가 아닙니다, 올바른 파일을 선택해서 다시 시도해주세요."
@@ -10397,16 +12178,6 @@ fn is_same_or_convertible_lpmbox_model_pair(device_model: &str, image_model: &st
             | ("TB336FU", "TB335FC")
             | ("TB335FC", "TB336FU")
     )
-}
-
-#[allow(dead_code)]
-fn lpmbox_model_family(model: &str) -> &'static str {
-    match model.trim().to_ascii_uppercase().as_str() {
-        "TB375FC" | "TB373FU" => "TB37X",
-        "TB365FC" | "TB361FU" => "TB36X",
-        "TB335FC" | "TB336FU" => "TB33X",
-        _ => "",
-    }
 }
 
 fn validate_device_and_firmware_for_convert_wipe(
@@ -10487,48 +12258,18 @@ fn validate_device_and_firmware_for_row_update_keep_data(
     }
 }
 
-fn validate_device_and_image_for_row_update_keep_data(
-    device: &lpmbox_device::AdbDeviceProbe,
-    output: &FlashPreparedOutput,
-) -> Result<String, String> {
-    let plan = &output.plan;
-
-    if !device.platform.eq_ignore_ascii_case(&plan.platform) {
-        return Err(image_folder_mismatch_message());
-    }
-
-    let device_model = normalize_lenovo_model_for_compare(&device.model);
-    let image_model = normalize_lenovo_model_for_compare(&plan.model);
-
-    if !is_same_or_convertible_lpmbox_model_pair(&device_model, &image_model) {
-        return Err(image_folder_mismatch_message());
-    }
-
-    match (device.region, plan.image_region) {
-        (RomRegion::Row, RomRegion::Row) => {
-            if !plan.keep_user_data {
-                return Err(image_folder_mismatch_message());
-            }
-
-            Ok("[Image] 기기에 ROW(글로벌롬) 버전을 업데이트 합니다.".to_string())
-        }
-        (RomRegion::Prc, RomRegion::Prc) => Err(
-            "[Image] LPMBOX는 PRC(중국 내수롬) 업데이트를 지원하지 않습니다.".to_string(),
-        ),
-        (RomRegion::Prc, RomRegion::Row) | (RomRegion::Row, RomRegion::Prc) => {
-            Err("[Image] 1. PRC/ROW 설치 [데이터 초기화]를 시도해주세요.".to_string())
-        }
-        _ => Err(image_folder_mismatch_message()),
-    }
-}
 
 fn run_proinfo_backup_flow(image_dir: PathBuf, tx: mpsc::Sender<ProinfoLiveEvent>) {
     if !ensure_mtk_driver_installed_for_flow(&tx) {
         return;
     }
 
+    lpmbox_device::trigger_rom_install_reboot_commands(|message| {
+        let _ = tx.send(ProinfoLiveEvent::Log(message));
+    });
+
     let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|preloader_detect|[Port] PreLoader 포트 감지 중... |".to_string(),
+        internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 중... │"),
     ));
 
     let detect = lpmbox_device::detect_preloader_until_timeout(30);
@@ -10542,7 +12283,7 @@ fn run_proinfo_backup_flow(image_dir: PathBuf, tx: mpsc::Sender<ProinfoLiveEvent
     }
 
     let _ = tx.send(ProinfoLiveEvent::Log(
-        "__SPINNER__|preloader_detect|[Port] PreLoader 포트 감지 완료".to_string(),
+        internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 완료"),
     ));
 
     let _ = tx.send(ProinfoLiveEvent::Log(
@@ -10619,6 +12360,7 @@ fn flash_prepared_log_messages(output: &FlashPreparedOutput) -> Vec<String> {
 async fn check_firmware_worker(image_dir: PathBuf) -> Result<RomFirmwareCheckResult, String> {
     tokio::task::spawn_blocking(move || {
         let driver_check = lpmbox_device::check_mtk_driver_installed();
+        let vc_runtime_check = lpmbox_device::check_vc_runtime_installed();
 
         let firmware = lpmbox_firmware::inspect_firmware(&image_dir)
             .map_err(|err| err.to_string())?;
@@ -10628,10 +12370,17 @@ async fn check_firmware_worker(image_dir: PathBuf) -> Result<RomFirmwareCheckRes
             Err(err) => (None, Some(err.to_string())),
         };
 
+        let (vc_runtime_status, vc_runtime_error) = match vc_runtime_check {
+            Ok(status) => (Some(status), None),
+            Err(err) => (None, Some(err.to_string())),
+        };
+
         Ok(RomFirmwareCheckResult {
             firmware,
             mtk_driver_installed,
             mtk_driver_error,
+            vc_runtime_status,
+            vc_runtime_error,
         })
     })
     .await
@@ -10904,10 +12653,13 @@ fn format_log_message(message: &str) -> String {
     visual_wrap(message, LOG_WRAP_CHARS)
 }
 
-fn parse_spinner_log(message: &str) -> Option<(String, String)> {
-    let rest = message.strip_prefix("__SPINNER__|")?;
-    let (key, message) = rest.split_once('|')?;
+fn internal_spinner_message(key: &str, message: &str) -> String {
+    format!("{INTERNAL_SPINNER_PREFIX}{key}|{message}")
+}
 
+fn parse_spinner_log(message: &str) -> Option<(String, String)> {
+    let rest = message.strip_prefix(INTERNAL_SPINNER_PREFIX)?;
+    let (key, message) = rest.split_once('|')?;
     Some((key.to_string(), message.to_string()))
 }
 
@@ -10915,6 +12667,12 @@ fn split_spinner_message(message: &str) -> (String, bool) {
     let trimmed = message.trim_end();
 
     for frame in UI_SPINNER_FRAMES {
+        if let Some(base) = trimmed.strip_suffix(frame) {
+            return (base.trim_end().to_string(), true);
+        }
+    }
+
+    for frame in ["|", "/", "-", "\\"] {
         if let Some(base) = trimmed.strip_suffix(frame) {
             return (base.trim_end().to_string(), true);
         }
@@ -11092,6 +12850,7 @@ struct LpmRomFolderValidationState {
     battery_low: bool,
     blocked_firmware: bool,
     mtk_driver_missing: bool,
+    vc_runtime_missing: bool,
 }
 
 impl LpmRomFolderValidationState {
@@ -11103,6 +12862,7 @@ impl LpmRomFolderValidationState {
             || self.battery_low
             || self.blocked_firmware
             || self.mtk_driver_missing
+            || self.vc_runtime_missing
     }
 
     fn has_blocking_error_for_next_step(&self) -> bool {
@@ -11112,6 +12872,7 @@ impl LpmRomFolderValidationState {
             || self.battery_low
             || self.blocked_firmware
             || self.mtk_driver_missing
+            || self.vc_runtime_missing
     }
 
     fn can_continue(&self) -> bool {
@@ -11138,43 +12899,6 @@ fn lpm_clean_display_value(value: &str) -> String {
     }
 }
 
-fn rom_display_unknown_model(model: impl AsRef<str>) -> String {
-    let model = model.as_ref().trim();
-
-    if model.is_empty()
-        || model == "감지 전"
-        || model == "알 수 없음"
-        || model.eq_ignore_ascii_case("UNKNOWN")
-        || model.eq_ignore_ascii_case("unknown")
-    {
-        "알 수 없음".to_string()
-    } else {
-        model.to_string()
-    }
-}
-
-#[allow(dead_code)]
-fn normalized_supported_lpmbox_model(model: &str) -> Option<&'static str> {
-    let upper = model.trim().to_ascii_uppercase();
-
-    if upper.is_empty()
-        || upper == "감지 전"
-        || upper == "알 수 없음"
-        || upper.contains("알 수 없음")
-    {
-        return None;
-    }
-
-    for known in [
-        "TB375FC", "TB373FU", "TB365FC", "TB361FU", "TB335FC", "TB336FU",
-    ] {
-        if upper.contains(known) {
-            return Some(known);
-        }
-    }
-
-    None
-}
 
 fn firmware_version_is_lower(image_version: Option<&str>, device_version: &str) -> bool {
     let Some(image_numbers) = extract_version_numbers(image_version.unwrap_or_default()) else {
@@ -11283,34 +13007,7 @@ fn lpm_nav_rom_status_card_style(has_error: bool) -> container::Style {
     }
 }
 
-fn lpm_nav_rom_diagnostic_log_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(230, 230, 230))),
-        text_color: Some(Color::from_rgb8(20, 20, 20)),
-        border: iced::Border {
-            radius: 0.0.into(),
-            width: 0.0,
-            color: Color::TRANSPARENT,
-        },
-        ..container::Style::default()
-    }
-}
 
-fn lpm_nav_disabled_button_style(
-    _theme: &Theme,
-    _status: iced::widget::button::Status,
-) -> button::Style {
-    button::Style {
-        background: Some(Background::Color(Color::from_rgb8(148, 148, 148))),
-        text_color: Color::from_rgb8(255, 255, 255),
-        border: iced::Border {
-            radius: 4.0.into(),
-            width: 0.0,
-            color: Color::TRANSPARENT,
-        },
-        ..button::Style::default()
-    }
-}
 
 fn lpm_nav_rom_option_card_style(_theme: &Theme) -> container::Style {
     container::Style {
@@ -11400,14 +13097,6 @@ fn lpm_nav_mtk_driver_popup_scrim_style(_theme: &Theme) -> container::Style {
     }
 }
 
-fn lpm_nav_rom_routine_select_content_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border::default(),
-        ..container::Style::default()
-    }
-}
 
 fn lpm_nav_rom_routine_row_disabled_style(_theme: &Theme) -> container::Style {
     container::Style {
@@ -11435,20 +13124,6 @@ fn lpm_nav_rom_routine_row_style(_theme: &Theme) -> container::Style {
     }
 }
 
-#[allow(dead_code)]
-fn lpm_nav_rom_routine_handle_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(222, 225, 236))),
-        text_color: Some(Color::from_rgb8(255, 255, 255)),
-        border: iced::Border {
-            radius: 17.0.into(),
-            width: 0.0,
-            color: Color::TRANSPARENT,
-        },
-        ..container::Style::default()
-    }
-}
-
 fn lpm_nav_rom_routine_slide_style(_theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
@@ -11462,115 +13137,7 @@ fn lpm_nav_rom_routine_slide_style(_theme: &Theme) -> container::Style {
     }
 }
 
-fn lpm_nav_rom_bottom_bar_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 12.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
-}
 
-fn lpm_nav_rom_image_info_panel_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
-}
-
-#[allow(dead_code)]
-fn lpm_nav_rom_folder_info_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
-}
-
-#[allow(dead_code)]
-fn lpm_nav_rom_device_ok_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(175, 251, 184))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(150, 226, 160),
-        },
-        ..container::Style::default()
-    }
-}
-
-#[allow(dead_code)]
-fn lpm_nav_rom_device_bad_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 170, 170))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(230, 138, 138),
-        },
-        ..container::Style::default()
-    }
-}
-
-#[allow(dead_code)]
-fn lpm_nav_rom_battery_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
-}
-
-#[allow(dead_code)]
-fn lpm_nav_rom_battery_ok_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(175, 251, 184))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(150, 226, 160),
-        },
-        ..container::Style::default()
-    }
-}
-
-#[allow(dead_code)]
-fn lpm_nav_rom_battery_bad_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 170, 170))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(230, 138, 138),
-        },
-        ..container::Style::default()
-    }
-}
 
 
 
@@ -11646,20 +13213,6 @@ fn lpm_nav_rom_step_card_style(_theme: &Theme) -> container::Style {
     }
 }
 
-#[allow(dead_code)]
-fn lpm_nav_rom_summary_item_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(248, 248, 252))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 10.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(232, 234, 242),
-        },
-        ..container::Style::default()
-    }
-}
-
 fn lpm_nav_rom_error_card_style(_theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(Color::from_rgb8(255, 246, 246))),
@@ -11669,70 +13222,6 @@ fn lpm_nav_rom_error_card_style(_theme: &Theme) -> container::Style {
             width: 1.0,
             color: Color::from_rgb8(240, 198, 198),
         },
-        ..container::Style::default()
-    }
-}
-
-#[allow(dead_code)]
-fn lpm_nav_rom_disabled_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(245, 245, 248))),
-        text_color: Some(Color::from_rgb8(116, 118, 130)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(226, 228, 236),
-        },
-        ..container::Style::default()
-    }
-}
-
-#[allow(dead_code)]
-fn lpm_nav_rom_big_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(25, 27, 36)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.2,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
-}
-
-#[allow(dead_code)]
-fn lpm_nav_rom_slide_handle_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(222, 225, 236))),
-        text_color: Some(Color::from_rgb8(255, 255, 255)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.2,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
-}
-
-#[allow(dead_code)]
-fn lpm_nav_rom_slide_expanded_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.2,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
-}
-
-#[allow(dead_code)]
-fn lpm_nav_rom_card_divider_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(218, 220, 232))),
         ..container::Style::default()
     }
 }
@@ -11799,9 +13288,6 @@ fn lpm_nav_settings_move_button_style(
         ..iced::widget::button::Style::default()
     }
 }
-
-
-#[allow(dead_code)]
 fn lpm_nav_rom_card_button_style(
     _theme: &Theme,
     status: iced::widget::button::Status,
@@ -11910,13 +13396,6 @@ fn lpm_nav_panel_style(_theme: &Theme) -> container::Style {
     }
 }
 
-fn lpm_nav_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(243, 245, 252))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        ..container::Style::default()
-    }
-}
 
 fn lpm_nav_extra_option_card_style(_theme: &Theme) -> container::Style {
     container::Style {
@@ -11931,13 +13410,6 @@ fn lpm_nav_extra_option_card_style(_theme: &Theme) -> container::Style {
     }
 }
 
-fn lpm_nav_primary_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(232, 238, 255))),
-        text_color: Some(Color::from_rgb8(29, 42, 86)),
-        ..container::Style::default()
-    }
-}
 
 fn lpm_nav_status_idle_style(_theme: &Theme) -> container::Style {
     container::Style {
@@ -11955,18 +13427,6 @@ fn lpm_nav_status_busy_style(_theme: &Theme) -> container::Style {
     }
 }
 
-fn lpm_nav_tooltip_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(245, 245, 250))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 8.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(210, 212, 224),
-        },
-        ..container::Style::default()
-    }
-}
 
 fn lpm_nav_dashboard_inner_style(_theme: &Theme) -> container::Style {
     container::Style {
@@ -12344,64 +13804,6 @@ fn compact_text(text: &str, max_chars: usize) -> String {
     format!("{front} ... {back}")
 }
 
-fn build_rom_folder_issue_recommendation(
-    image_model_problem: bool,
-    connected_model_problem: bool,
-    battery_problem: bool,
-    blocked_firmware_problem: bool,
-) -> String {
-    if image_model_problem
-        && !connected_model_problem
-        && !battery_problem
-        && !blocked_firmware_problem
-    {
-        return "올바른 image 폴더로 다시 시도해 주세요.".to_string();
-    }
-
-    if connected_model_problem
-        && !image_model_problem
-        && !battery_problem
-        && !blocked_firmware_problem
-    {
-        return "올바른 기기를 연결해주세요.".to_string();
-    }
-
-    if battery_problem
-        && !image_model_problem
-        && !connected_model_problem
-        && !blocked_firmware_problem
-    {
-        return "25% 이상 충전 후 다시 시도해주세요.".to_string();
-    }
-
-    if blocked_firmware_problem
-        && !image_model_problem
-        && !connected_model_problem
-        && !battery_problem
-    {
-        return "다른 버전 파일로 다시 시도해 주세요.".to_string();
-    }
-
-    let mut actions = Vec::new();
-
-    if image_model_problem {
-        actions.push("올바른 image 폴더 재선택");
-    }
-
-    if connected_model_problem {
-        actions.push("올바른 기기 연결");
-    }
-
-    if blocked_firmware_problem {
-        actions.push("다른 버전 파일로 재시도");
-    }
-
-    if battery_problem {
-        actions.push("25% 이상 충전");
-    }
-
-    format!("{} 후 다시 시도해주세요.", actions.join(", "))
-}
 
 fn yes_no(value: bool) -> &'static str {
     if value { "있음" } else { "없음" }
@@ -12451,4 +13853,125 @@ mod lpm_i18n_tests {
         assert_eq!(LanguageOption::from_code("jp"), Some(LanguageOption::Japanese));
         assert_eq!(LanguageOption::from_code("es"), Some(LanguageOption::Spanish));
     }
+
+    #[test]
+    fn canonical_language_codes_are_written() {
+        assert_eq!(LanguageOption::Japanese.code(), "jp");
+        assert_eq!(LanguageOption::TraditionalChinese.code(), "zh-TW");
+    }
+
+    #[test]
+    fn simplified_chinese_locales_fall_back_to_english() {
+        assert_eq!(LanguageOption::from_locale("zh-CN"), Some(LanguageOption::English));
+        assert_eq!(LanguageOption::from_locale("zh-Hans"), Some(LanguageOption::English));
+        assert_eq!(LanguageOption::from_locale("zh-TW"), Some(LanguageOption::TraditionalChinese));
+    }
+
+    #[test]
+    fn localization_purity_gate_removes_hangul_for_non_korean_languages() {
+        for language in LANGUAGE_OPTIONS {
+            if language.is_korean() {
+                continue;
+            }
+
+            let output = enforce_selected_language_output(
+                language,
+                "ADB 기기 감지 실패: TB375FC",
+                "ADB 기기 감지 실패: TB375FC".to_string(),
+            );
+            assert!(!contains_hangul(&output));
+            assert!(output.contains("TB375FC"));
+        }
+    }
+
+    #[test]
+    fn spinner_control_messages_never_use_public_marker_text() {
+        let message = internal_spinner_message("preloader_detect", "PreLoader");
+        let public_marker = ["__", "SPINNER", "__"].concat();
+        assert!(!message.contains(&public_marker));
+        assert_eq!(
+            parse_spinner_log(&message),
+            Some(("preloader_detect".to_string(), "PreLoader".to_string()))
+        );
+    }
+
+    #[test]
+    fn v312_runtime_messages_are_fully_localized() {
+        let messages = [
+            "[ADB] adb reboot 1회 실행 중...",
+            "[ADB] adb reboot 1회 실행 완료",
+            "[ADB] adb reboot 1회 실행 실패, Fastboot 명령을 계속 시도합니다.",
+            "[Fastboot] fastboot reboot 1회 실행 중...",
+            "[Fastboot] fastboot reboot 1회 실행 완료",
+            "[Fastboot] fastboot reboot 1회 실행 실패, PreLoader 감지를 계속합니다.",
+            "[Image] 온라인 차단 펌웨어 규칙을 확인합니다: https://example.invalid/rules.ini",
+            "[Image] 온라인 차단 펌웨어 규칙 확인 완료: 128 bytes",
+            "온라인 차단 펌웨어 규칙 확인 실패: 파일을 찾을 수 없습니다: 차단 펌웨어 규칙 응답이 비어 있습니다.",
+        ];
+
+        for language in LANGUAGE_OPTIONS {
+            if language.is_korean() {
+                continue;
+            }
+
+            for message in messages {
+                let translated = lpm_translate_v312_runtime_message(language, message)
+                    .expect("v3.1.2 runtime message translation");
+                assert!(!contains_hangul(&translated));
+            }
+        }
+    }
+    #[test]
+    fn japanese_language_code_and_label_use_jp() {
+        assert_eq!(LanguageOption::Japanese.code(), "jp");
+        assert_eq!(LanguageOption::from_code("jp"), Some(LanguageOption::Japanese));
+        assert_eq!(LanguageOption::from_code("ja"), Some(LanguageOption::Japanese));
+        assert_eq!(LanguageOption::Japanese.to_string(), "日本語 (jp)");
+    }
+
+    #[test]
+    fn localized_whitespace_cleanup_preserves_explicit_line_breaks() {
+        let output = normalize_localized_whitespace_preserving_lines(
+            "First  line\nSecond   line\nThird line".to_string(),
+        );
+        assert_eq!(output, "First line\nSecond line\nThird line");
+    }
+
+    #[test]
+    fn known_runtime_logs_do_not_leave_hangul_in_non_korean_languages() {
+        let messages = [
+            "[1단계] ADB 기기 감지 및 기기 정보 확인",
+            "[Image] image 폴더에 lk_a, lk_b, dtbo_a, dtbo_b 파일을 복사합니다.",
+            "[Image] TB375FC lk, dtbo 파일을 다운로드 합니다.",
+            "[Plan] 작업 scatter XML 재파싱: 성공 / root: root / partition 86개",
+            "[Log] PRC ↔ ROW 설치 작업 로그를 C:\\Temp\\log.txt에 저장합니다.",
+            "TB375FC ZUI_17.5.10.060_ST 버전은 설치 금지 목록에 포함되어 있습니다.",
+        ];
+
+        for language in LANGUAGE_OPTIONS {
+            if language.is_korean() {
+                continue;
+            }
+
+            for message in messages {
+                let translated = lpm_translate_known_runtime_log(language, message)
+                    .expect("known runtime log translation");
+                assert!(
+                    !contains_hangul(&translated),
+                    "{language:?}: {translated}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn spinner_frames_match_gbst_and_replace_by_key() {
+        assert_eq!(UI_SPINNER_FRAMES, ["│", "╱", "━", "╲"]);
+        for frame in UI_SPINNER_FRAMES {
+            let (base, active) = split_spinner_message(&format!("[ADB] Detecting... {frame}"));
+            assert!(active);
+            assert_eq!(base, "[ADB] Detecting...");
+        }
+    }
+
 }

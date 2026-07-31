@@ -25,14 +25,6 @@ pub enum PatchPlanMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeviceInfo {
-    pub model: String,
-    pub android_version: Option<String>,
-    pub region: RomRegion,
-    pub current_slot: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScatterPartition {
     pub name: String,
     pub partition_index: Option<String>,
