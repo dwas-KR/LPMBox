@@ -1,4 +1,12 @@
 #![windows_subsystem = "windows"]
+// SPDX-License-Identifier: GPL-3.0-only
+
+mod appearance;
+mod log_cleanup;
+mod cache_cleanup;
+include!("gbst_shell.rs");
+use iced::widget::Space;
+use appearance::{AccentChoice, Appearance, ThemeChoice, system_prefers_dark};
 
 use chrono::Local;
 use image as image_crate;
@@ -16,8 +24,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const WINDOW_WIDTH: f32 = 800.0;
-const WINDOW_HEIGHT: f32 = 600.0;
+const WINDOW_WIDTH: f32 = 820.0;
+const WINDOW_HEIGHT: f32 = 720.0;
 const APP_DISPLAY_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const BODY_FONT: u32 = 15;
@@ -103,9 +111,10 @@ const LOADING_PROGRESS_FRAME_BYTES: [&[u8]; 15] = [
 const LOADING_PROGRESS_SIZE: u32 = 74;
 const LOADING_PROGRESS_ACTIVE_ALPHA_THRESHOLD: u8 = 220;
 
-const SIDEBAR_RAIL_WIDTH: f32 = 64.0;
-const SIDEBAR_EXPANDED_WIDTH: f32 = 210.0;
-const NAV_BTN_HEIGHT: f32 = 38.0;
+const SIDEBAR_RAIL_WIDTH: f32 = 80.0;
+const SIDEBAR_EXPANDED_WIDTH: f32 = 232.0;
+const EXPANDED_CONTENT_WIDTH: f32 = 1000.0;
+const NAV_BTN_HEIGHT: f32 = 56.0;
 
 const LOG_WRAP_CHARS: usize = 86;
 
@@ -1788,6 +1797,11 @@ fn lpm_translate_known_runtime_log(lang: LanguageOption, text: &str) -> Option<S
     if let Some(rest) = text.strip_prefix("[Log] ") {
         if let Some((flow, remainder)) = rest.split_once(" 작업 로그를 ") {
             if let Some(path) = remainder.strip_suffix("에 저장합니다.") {
+                // Dynamic task labels must be localized as well as the log prefix.
+                // The old formatting left "설치" behind for non-Korean users.
+                let flow = lpm_translate_exact(lang, flow)
+                    .or_else(|| lpm_translate_exact_stage5(lang, flow))
+                    .unwrap_or(flow);
                 return Some(format!(
                     "{}{flow}: {path}",
                     lpm_lang_text(
@@ -1966,12 +1980,32 @@ fn lpm_translate_owned(content: String) -> String {
     let lang = active_language_option();
 
     if lang.is_korean() {
-        return content;
+        return lpmbox_core::language_catalog::translate_fixed(lang.code(), &content)
+            .unwrap_or(content);
     }
 
     let (content, spinner_frame) = detach_spinner_frame_owned(content);
 
+    // JSON catalogs take precedence for complete UI messages.
+    let catalog_key = if content == "선택한 경로에 image 폴더가 없습니다. image 폴더 또는 그 상위 폴더를 선택해주세요." {
+        Some("lpm.folder.missing_image")
+    } else {
+        None
+    };
+    if let Some(key) = catalog_key {
+        let text = lpmbox_core::language_catalog::translate(lang.code(), key);
+        return if let Some(frame) = spinner_frame {
+            format!("{} {}", text.trim_end(), frame)
+        } else {
+            text
+        };
+    }
+
     let translated = if let Some(translated) =
+        lpmbox_core::language_catalog::translate_fixed(lang.code(), content.as_str())
+    {
+        translated
+    } else if let Some(translated) =
         lpm_translate_known_runtime_log(lang, content.as_str())
     {
         translated
@@ -2014,6 +2048,10 @@ fn lpm_translate_owned(content: String) -> String {
         translated.to_string()
     } else if let Some(translated) = lpm_translate_exact(lang, content.as_str()) {
         translated.to_string()
+    } else if let Some(translated) =
+        lpmbox_core::language_catalog::translate_legacy(lang.code(), content.as_str())
+    {
+        translated
     } else {
         let translated = lpm_translate_stage8_phrasewise(lang, content.clone());
         let translated = lpm_translate_stage7_phrasewise(lang, translated);
@@ -3996,6 +4034,19 @@ const ROM_BOTTOM_BUTTON_FONT: u32 = 12;
 
 const LPMBOX_MIN_BATTERY_LEVEL: u8 = 20;
 
+fn resolve_image_folder_selection(selected: &Path) -> Result<PathBuf, &'static str> {
+    if selected.file_name().is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("image"))
+        && selected.is_dir()
+    {
+        return Ok(selected.to_path_buf());
+    }
+    let nested = selected.join("image");
+    if nested.is_dir() {
+        return Ok(nested);
+    }
+    Err("선택한 경로에 image 폴더가 없습니다. image 폴더 또는 그 상위 폴더를 선택해주세요.")
+}
+
 fn main() -> iced::Result {
     #[cfg(target_os = "windows")]
     {
@@ -4011,12 +4062,14 @@ fn main() -> iced::Result {
 
     iced::application(App::new, App::update, App::view)
         .subscription(App::subscription)
+        .theme(App::theme)
         .title("LPMBox")
         .font(INTER_FONT_BYTES)
         .default_font(lpm_font())
         .window(window::Settings {
             size: Size::new(WINDOW_WIDTH, WINDOW_HEIGHT),
-            resizable: false,
+            resizable: true,
+            min_size: Some(Size::new(820.0, 720.0)),
             icon: lpm_window_icon(),
             ..window::Settings::default()
         })
@@ -4142,6 +4195,7 @@ struct App {
     sidebar_expanded: bool,
     sidebar_anim: f32,
     sidebar_velocity: f32,
+    window_size: (f32, f32),
 
     dashboard_info: lpmbox_device::DashboardDeviceInfo,
     dashboard_refreshing: bool,
@@ -4177,6 +4231,7 @@ struct App {
     nav_qna_handle: iced::widget::image::Handle,
     nav_log_handle: iced::widget::image::Handle,
     nav_settings_handle: iced::widget::image::Handle,
+    nav_dark_handles: Vec<(NavPage, iced::widget::image::Handle)>,
     loading_progress_handles: Vec<iced::widget::image::Handle>,
     rom_install_hover_since: Option<Instant>,
     rom_update_hover_since: Option<Instant>,
@@ -4193,6 +4248,11 @@ struct App {
     rom_country_code_search: String,
     additional_country_reset_pending: bool,
     settings_language: LanguageOption,
+    appearance: Appearance,
+    system_dark: bool,
+    license_dialog_open: bool,
+    log_cleanup_confirmation_open: bool,
+    cache_cleanup_confirmation_open: bool,
     active_log_flow: Option<RuntimeFlowKind>,
     program_update_checking: bool,
     dashboard_update_notice: Option<ProgramUpdateCheckResult>,
@@ -4251,6 +4311,7 @@ enum NavPage {
     Qna,
     Log,
     Settings,
+    About,
 }
 
 
@@ -6011,6 +6072,7 @@ enum Message {
     SidebarHoverEnter,
     SidebarHoverExit,
     SidebarAnimTick,
+    WindowResized(f32, f32),
 
     RomCardHoverEnter(RomSlideTarget),
     RomCardHoverExit(RomSlideTarget),
@@ -6039,12 +6101,26 @@ enum Message {
     OpenProgramVideos,
     OpenDonate,
     OpenFeedback,
+    OpenDownloadsFolder,
+    OpenLogFolder,
+    OpenSourceRepository,
+    OpenLTBoxRepository,
     CheckProgramUpdate,
     ProgramUpdateChecked(Result<ProgramUpdateCheckResult, String>),
     DashboardProgramUpdateChecked(Result<ProgramUpdateCheckResult, String>),
     OpenProgramUpdateRelease,
     DismissProgramUpdateNotice,
     SettingsLanguageSelected(LanguageOption),
+    SettingsThemeSelected(ThemeChoice),
+    SettingsAccentSelected(AccentChoice),
+    OpenLicenseDialog,
+    CloseLicenseDialog,
+    RequestSavedLogCleanup,
+    CancelSavedLogCleanup,
+    ConfirmSavedLogCleanup,
+    RequestCacheCleanup,
+    CancelCacheCleanup,
+    ConfirmCacheCleanup,
     WindowCloseRequested,
 }
 
@@ -6081,11 +6157,12 @@ fn lpm_nav_button<'a>(
     .height(Length::Fixed(28.0))
     .align_x(iced::alignment::Horizontal::Center)
     .align_y(iced::alignment::Vertical::Center)
-    .style(move |_theme: &Theme| {
+    .style(move |theme: &Theme| {
         if active {
+            let c = lpm_shell_palette(theme);
             container::Style {
-                background: Some(Background::Color(Color::from_rgb8(224, 228, 255))),
-                text_color: Some(Color::from_rgb8(43, 58, 118)),
+                background: Some(Background::Color(c.subtle)),
+                text_color: Some(c.accent),
                 border: iced::Border {
                     radius: 14.0.into(),
                     ..iced::Border::default()
@@ -6111,9 +6188,12 @@ fn lpm_nav_button<'a>(
                 .height(Length::Fill)
                 .align_y(iced::alignment::Vertical::Center)
                 .wrapping(iced::widget::text::Wrapping::Word)
-                .style(move |_theme: &Theme| iced::widget::text::Style {
-                    color: Some(Color::from_rgba(32.0 / 255.0, 35.0 / 255.0, 47.0 / 255.0, alpha)),
-                }),
+                .style(move |theme: &Theme| {
+                let c = lpm_shell_palette(theme);
+                iced::widget::text::Style {
+                    color: Some(Color { a: alpha, ..c.text }),
+                }
+            }),
         );
     }
 
@@ -6127,16 +6207,12 @@ fn lpm_nav_button<'a>(
         .width(Length::Fill)
         .height(Length::Fixed(NAV_BTN_HEIGHT))
         .on_press(Message::SelectNav(page))
-        .style(move |_theme: &Theme, status| {
+        .style(move |theme: &Theme, status| {
             let hovered = matches!(status, iced::widget::button::Status::Hovered);
-
+            let c = lpm_shell_palette(theme);
             iced::widget::button::Style {
-                background: if hovered {
-                    Some(Background::Color(Color::from_rgb8(233, 235, 246)))
-                } else {
-                    None
-                },
-                text_color: Color::from_rgb8(32, 35, 47),
+                background: if hovered { Some(Background::Color(c.subtle)) } else { None },
+                text_color: c.text,
                 border: iced::Border {
                     radius: 18.0.into(),
                     ..iced::Border::default()
@@ -6208,6 +6284,7 @@ fn nav_page_title(page: NavPage) -> &'static str {
         NavPage::Qna => "QnA",
         NavPage::Log => "로그 관리",
         NavPage::Settings => "설정",
+        NavPage::About => "정보",
     }
 }
 
@@ -6221,10 +6298,19 @@ fn nav_page_subtitle(page: NavPage) -> &'static str {
         NavPage::Qna => "LPMBOX QnA 페이지로 이동합니다.",
         NavPage::Log => "작업 로그를 확인하고 텍스트 파일로 저장합니다.",
         NavPage::Settings => "LPMBOX 프로그램을 설정합니다.",
+        NavPage::About => "프로젝트 및 라이선스 정보를 확인합니다.",
     }
 }
 
 impl App {
+    fn theme(&self) -> Theme {
+        self.appearance.as_theme(self.system_dark)
+    }
+
+    fn catalog(&self, key: &str) -> String {
+        lpmbox_core::language_catalog::translate(self.settings_language.code(), key)
+    }
+
     fn new() -> (Self, Task<Message>) {
         let (initial_language, initial_language_source) = initial_language_option_with_source();
         set_active_language_option(initial_language);
@@ -6256,6 +6342,7 @@ impl App {
         sidebar_expanded: false,
         sidebar_anim: 0.0,
         sidebar_velocity: 0.0,
+        window_size: (WINDOW_WIDTH, WINDOW_HEIGHT),
 
         dashboard_info: lpmbox_device::DashboardDeviceInfo::default(),
         dashboard_refreshing: false,
@@ -6291,6 +6378,17 @@ impl App {
         nav_qna_handle: smooth_png_handle(NAV_QNA_ICON_BYTES, 21, 21),
         nav_log_handle: smooth_png_handle(NAV_LOG_ICON_BYTES, 21, 21),
         nav_settings_handle: smooth_png_handle(NAV_SETTINGS_ICON_BYTES, 21, 21),
+        nav_dark_handles: vec![
+            (NavPage::Dashboard, light_nav_png_handle(NAV_HOME_ICON_BYTES,21,21)),
+            (NavPage::Rom, light_nav_png_handle(NAV_REFRESH_ICON_BYTES,21,21)),
+            (NavPage::Driver, light_nav_png_handle(NAV_TAB_SETTINGS_ICON_BYTES,21,21)),
+            (NavPage::FirmwareDownload, light_nav_png_handle(NAV_FIRMWARE_DOWNLOAD_ICON_BYTES,21,21)),
+            (NavPage::Backup, dark_nav_png_handle_with_white_knockout(NAV_LOG_ICON_BYTES,21,21)),
+            (NavPage::Qna, light_nav_png_handle(NAV_QNA_ICON_BYTES,21,21)),
+            (NavPage::Log, dark_nav_png_handle_with_white_knockout(NAV_LOG_ICON_BYTES,21,21)),
+            (NavPage::Settings, light_nav_png_handle(NAV_SETTINGS_ICON_BYTES,21,21)),
+            (NavPage::About, light_nav_png_handle(NAV_TAB_SETTINGS_ICON_BYTES,21,21)),
+        ],
         loading_progress_handles: build_loading_progress_handles(),
 
         rom_install_hover_since: None,
@@ -6307,6 +6405,11 @@ impl App {
         rom_country_code_search: String::new(),
         additional_country_reset_pending: false,
         settings_language: initial_language,
+        appearance: Appearance::load(),
+        system_dark: system_prefers_dark(),
+        license_dialog_open: false,
+        log_cleanup_confirmation_open: false,
+        cache_cleanup_confirmation_open: false,
         active_log_flow: None,
         program_update_checking: false,
         dashboard_update_notice: None,
@@ -6470,10 +6573,12 @@ fn subscription(&self) -> Subscription<Message> {
     }
 
     subscriptions.push(iced::event::listen_with(|event, _, _| {
-        if let iced::Event::Window(iced::window::Event::CloseRequested) = event {
-            Some(Message::WindowCloseRequested)
-        } else {
-            None
+        match event {
+            iced::Event::Window(iced::window::Event::CloseRequested) =>
+                Some(Message::WindowCloseRequested),
+            iced::Event::Window(iced::window::Event::Resized(size)) =>
+                Some(Message::WindowResized(size.width, size.height)),
+            _ => None,
         }
     }));
 
@@ -6833,6 +6938,34 @@ Message::RomSlideTick => {
     Task::none()
 }
 
+Message::OpenDownloadsFolder => {
+    let path = lpmbox_core::app_paths::tool_download_dir();
+    match std::fs::create_dir_all(&path).and_then(|_| open::that(&path).map_err(std::io::Error::other)) {
+        Ok(_) => {},
+        Err(err) => self.push_log(format!("[Settings] Unable to open download folder: {err}")),
+    }
+    Task::none()
+}
+Message::OpenLogFolder => {
+    let path = lpmbox_core::app_paths::log_dir();
+    match std::fs::create_dir_all(&path).and_then(|_| open::that(&path).map_err(std::io::Error::other)) {
+        Ok(_) => {},
+        Err(err) => self.push_log(format!("[Settings] Unable to open logs folder: {err}")),
+    }
+    Task::none()
+}
+Message::OpenSourceRepository => {
+    if let Err(err) = open::that("https://github.com/dwas-KR/LPMBox") {
+        self.push_log(format!("[Link] Unable to open LPMBox source: {err}"));
+    }
+    Task::none()
+}
+Message::OpenLTBoxRepository => {
+    if let Err(err) = open::that("https://github.com/jjhitel/LTBox") {
+        self.push_log(format!("[Link] Unable to open LTBox reference: {err}"));
+    }
+    Task::none()
+}
 Message::SelectNav(page) => {
     if page == NavPage::FirmwareDownload {
         return self.update(Message::OpenFirmwareDownload);
@@ -7093,6 +7226,74 @@ Message::DismissProgramUpdateNotice => {
     Task::none()
 }
 
+Message::SettingsThemeSelected(theme) => {
+    self.appearance.theme = theme;
+    if let Err(err) = self.appearance.save() {
+        self.push_log(format!("[Settings] Unable to save theme: {err}"));
+    }
+    Task::none()
+}
+Message::SettingsAccentSelected(accent) => {
+    self.appearance.accent = accent;
+    if let Err(err) = self.appearance.save() {
+        self.push_log(format!("[Settings] Unable to save accent: {err}"));
+    }
+    Task::none()
+}
+Message::RequestCacheCleanup => {
+    if !self.busy { self.cache_cleanup_confirmation_open = true; }
+    Task::none()
+}
+Message::CancelCacheCleanup => {
+    self.cache_cleanup_confirmation_open = false;
+    Task::none()
+}
+Message::ConfirmCacheCleanup => {
+    self.cache_cleanup_confirmation_open = false;
+    if self.busy {
+        self.push_log("[Settings] Cannot clear downloads while an operation is active");
+    } else {
+        let root = lpmbox_core::app_paths::tool_download_dir();
+        match cache_cleanup::clean_transient_downloads(&root) {
+            Ok(report) => self.push_log(format!(
+                "[Settings] Removed {} incomplete download fragments ({} bytes). Firmware ZIP files preserved.",
+                report.files_removed, report.bytes_freed)),
+            Err(err) => self.push_log(format!("[Settings] Download cache cleanup failed: {err}")),
+        }
+    }
+    Task::none()
+}
+Message::OpenLicenseDialog => {
+    self.license_dialog_open = true;
+    Task::none()
+}
+Message::CloseLicenseDialog => {
+    self.license_dialog_open = false;
+    Task::none()
+}
+Message::RequestSavedLogCleanup => {
+    if !self.busy { self.log_cleanup_confirmation_open = true; }
+    Task::none()
+}
+Message::CancelSavedLogCleanup => {
+    self.log_cleanup_confirmation_open = false;
+    Task::none()
+}
+Message::ConfirmSavedLogCleanup => {
+    self.log_cleanup_confirmation_open = false;
+    if self.busy {
+        self.push_log("[Settings] Cannot delete saved logs while an operation is active");
+    } else {
+        let root = lpmbox_core::app_paths::log_dir();
+        match log_cleanup::remove_lpmbox_logs(&root, &root.join("diagnostics")) {
+            Ok(report) => self.push_log(format!(
+                "[Settings] Removed {} LPMBox log files ({} bytes). Other files and backups preserved.",
+                report.files_removed, report.bytes_freed)),
+            Err(err) => self.push_log(format!("[Settings] Log cleanup failed: {err}")),
+        }
+    }
+    Task::none()
+}
 Message::SettingsLanguageSelected(language) => {
     self.settings_language = language;
     set_active_language_option(language);
@@ -7112,12 +7313,24 @@ Message::WindowCloseRequested => {
 }
 
 Message::SidebarHoverEnter => {
-    self.sidebar_expanded = true;
+    if self.window_is_compact() { self.sidebar_expanded = true; }
     Task::none()
 }
 
 Message::SidebarHoverExit => {
     self.sidebar_expanded = false;
+    Task::none()
+}
+Message::WindowResized(width, height) => {
+    if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
+        let was_compact = self.window_is_compact();
+        self.window_size = (width, height);
+        if was_compact != self.window_is_compact() {
+            self.sidebar_expanded = false;
+            self.sidebar_anim = 0.0;
+            self.sidebar_velocity = 0.0;
+        }
+    }
     Task::none()
 }
 
@@ -7150,6 +7363,16 @@ Message::SidebarAnimTick => {
                     return Task::none();
                 };
 
+                let folder = match resolve_image_folder_selection(&folder) {
+                    Ok(image) => image,
+                    Err(message) => {
+                        self.image_dir = None;
+                        self.rom_firmware_info = None;
+                        self.rom_firmware_error = Some(message.to_owned());
+                        self.push_log(message);
+                        return Task::none();
+                    }
+                };
                 self.image_dir = Some(folder.clone());
                 self.rom_firmware_info = None;
                 self.rom_firmware_error = None;
@@ -7518,36 +7741,11 @@ Message::StartReinstallWipe => {
     }
 
 fn view(&self) -> Element<'_, Message> {
-    let status = if self.busy { lpm_translate_owned("작업 중".to_string()) } else { lpm_translate_owned("대기 중".to_string()) };
-
     let image_dir_text = self
         .image_dir
         .as_ref()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "선택된 image 폴더 없음".to_string());
-
-    let status_badge = if self.busy {
-        container(text(status.clone()).size(12))
-            .padding([6.0, 12.0])
-            .style(lpm_nav_status_busy_style)
-    } else {
-        container(text(status.clone()).size(12))
-            .padding([6.0, 12.0])
-            .style(lpm_nav_status_idle_style)
-    };
-
-    let header_right: Element<'_, Message> =
-        if self.active_nav == NavPage::Rom
-            || self.active_nav == NavPage::Driver
-            || self.active_nav == NavPage::Settings
-        {
-            iced::widget::Space::new()
-                .width(Length::Fixed(1.0))
-                .height(Length::Fixed(1.0))
-                .into()
-        } else {
-            status_badge.into()
-        };
 
     let page_title = if self.active_nav == NavPage::Rom && self.rom_option_target.is_some() {
         "옵션 선택"
@@ -7568,22 +7766,6 @@ fn view(&self) -> Element<'_, Message> {
     } else {
         nav_page_subtitle(self.active_nav)
     };
-
-let header = container(
-    row![
-        column![
-            text(page_title).size(24),
-            text(page_subtitle).size(12),
-        ]
-        .spacing(3)
-        .width(Length::Fill),
-        header_right,
-    ]
-    .spacing(12),
-)
-.width(Length::Fill)
-.padding([14.0, 16.0])
-.style(lpm_nav_header_style);
 
     let image_panel = container(
         column![
@@ -7749,295 +7931,86 @@ let header = container(
     .padding([24.0, 0.0])
     .align_x(iced::alignment::Horizontal::Center);
 
-let mut log_rows = column![]
-    .spacing(0)
-    .width(Length::Fill);
-
-if matches!(self.active_nav, NavPage::Log | NavPage::Backup) {
-    for log_row_text in &self.log_display_rows_cache {
-        log_rows = log_rows.push(
-            iced_text(log_row_text.as_str())
-                .size(LOG_FONT)
-                .width(Length::Fill)
-                .wrapping(iced::widget::text::Wrapping::Word),
-        );
-    }
-}
-
-let log_content = container(log_rows)
-    .width(Length::Fill)
-    .padding(iced::Padding {
-        top: 12.0,
-        right: 20.0,
-        bottom: 12.0,
-        left: 12.0,
-    });
-
-    let log_panel = container(
-        scrollable(log_content)
-            .anchor_bottom()
-            .anchor_left()
-            .auto_scroll(true)
-            .width(Length::Fill)
-            .height(Length::Fill),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .padding(0)
-    .style(log_container_style);
-
-    let log_section = container(
+    // The visual shell below follows the actual GBST v2.0.0 layout:
+    // full-window status bar, 64px heading, Material cards, pill navigation
+    // and a compact-overlaid / wide-docked sidebar. Existing MTK/ROM
+    // operations remain owned by LPMBox and are only connected to GUI actions.
+    let main_body: Element<'_, Message> = match self.active_nav {
+        NavPage::Dashboard => self.gbst_dashboard_panel(),
+        NavPage::Rom => {
+            if self.busy && self.running_rom_target.is_some() {
+                self.gbst_rom_execution_panel()
+            } else {
+                container(rom_panel).width(Length::Fill).height(Length::Fill)
+                    .padding(20).into()
+            }
+        }
+        NavPage::Backup => {
+            column![image_panel,backup_panel,self.gbst_log_panel()]
+                .spacing(16).padding(20).width(Length::Fill)
+                .height(Length::Fill).into()
+        }
+        NavPage::Driver => {
+            container(driver_panel).width(Length::Fill).height(Length::Fill)
+                .padding(20).into()
+        }
+        NavPage::FirmwareDownload => self.gbst_settings_panel(),
+        NavPage::Qna => self.gbst_settings_panel(),
+        NavPage::Log => {
+            container(self.gbst_log_panel())
+                .width(Length::Fill).height(Length::Fill)
+                .padding(16).into()
+        }
+        NavPage::Settings => self.gbst_settings_panel(),
+        NavPage::About => self.gbst_about_panel(),
+    };
+    let page_column = if matches!(self.active_nav, NavPage::Dashboard | NavPage::About) {
+        column![container(main_body).width(Length::Fill).height(Length::Fill)
+            .style(shell_main_style)]
+            .height(Length::Fill).spacing(0)
+    } else {
         column![
-            row![
-                text("작업 로그").size(18),
-                text("ADB / Fastboot / PreLoader / SPFlashToolV6 진행 상태").size(12),
-            ]
-            .spacing(10),
-            row![
-                button(text("로그 내보내기").size(BODY_FONT)).on_press(Message::ExportLog),
-                button(text("로그 지우기").size(BODY_FONT)).on_press(Message::ClearLog),
-            ]
-            .spacing(8),
-            log_panel,
-        ]
-        .spacing(10),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .padding(14)
-    .style(lpm_nav_panel_style);
-
-    let language_picker = pick_list(
-        LANGUAGE_OPTIONS,
-        Some(self.settings_language),
-        Message::SettingsLanguageSelected,
-    )
-    .text_size(12)
-    .style(lpm_nav_language_pick_list_style)
-    .menu_style(lpm_nav_language_pick_list_menu_style)
-    .width(Length::Fixed(170.0));
-
-    let settings_panel = container(
-        column![
-            container(
-                row![
-                    column![
-                        text("언어 변경")
-                            .size(22)
-                            .font(lpm_bold_font()),
-                        text("프로그램 언어를 변경합니다.")
-                            .size(12),
-                    ]
-                    .spacing(6)
-                    .width(Length::Fill),
-                    language_picker,
-                ]
-                .spacing(10)
-                .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .padding([4.0, 0.0]),
-            container(
-                row![
-                    column![
-                        text("개발자 유튜브")
-                            .size(22)
-                            .font(lpm_bold_font()),
-                        text("샤오신패드에 유용한 프로그램을 확인하실 수 있습니다.")
-                            .size(12),
-                    ]
-                    .spacing(6)
-                    .width(Length::Fill),
-                    button(
-                        container(text("이동").size(12))
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .align_x(iced::alignment::Horizontal::Center)
-                            .align_y(iced::alignment::Vertical::Center),
-                    )
-                    .width(Length::Fixed(100.0))
-                    .height(Length::Fixed(28.0))
-                    .padding(0.0)
-                    .style(lpm_nav_settings_move_button_style)
-                    .on_press(Message::OpenDeveloperYoutube),
-                ]
-                .spacing(10)
-                .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .padding([4.0, 0.0]),
-            container(
-                row![
-                    column![
-                        text("후원하기")
-                            .size(22)
-                            .font(lpm_bold_font()),
-                        text("개발자에게 큰 힘과 응원이 됩니다.")
-                            .size(12),
-                    ]
-                    .spacing(6)
-                    .width(Length::Fill),
-                    button(
-                        container(text("이동").size(12))
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .align_x(iced::alignment::Horizontal::Center)
-                            .align_y(iced::alignment::Vertical::Center),
-                    )
-                    .width(Length::Fixed(100.0))
-                    .height(Length::Fixed(28.0))
-                    .padding(0.0)
-                    .style(lpm_nav_settings_move_button_style)
-                    .on_press(Message::OpenDonate),
-                ]
-                .spacing(10)
-                .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .padding([4.0, 0.0]),
-            container(
-                row![
-                    column![
-                        text("프로그램 업데이트")
-                            .size(22)
-                            .font(lpm_bold_font()),
-                        text("LPMBox 최신 릴리즈 버전을 확인합니다.")
-                            .size(12),
-                    ]
-                    .spacing(6)
-                    .width(Length::Fill),
-                    if self.program_update_checking {
-                        button(
-                            container(text("확인 중").size(12))
-                                .width(Length::Fill)
-                                .height(Length::Fill)
-                                .align_x(iced::alignment::Horizontal::Center)
-                                .align_y(iced::alignment::Vertical::Center),
-                        )
-                        .width(Length::Fixed(100.0))
-                        .height(Length::Fixed(28.0))
-                        .padding(0.0)
-                        .style(lpm_nav_settings_move_button_style)
-                    } else {
-                        button(
-                            container(text("확인").size(12))
-                                .width(Length::Fill)
-                                .height(Length::Fill)
-                                .align_x(iced::alignment::Horizontal::Center)
-                                .align_y(iced::alignment::Vertical::Center),
-                        )
-                        .width(Length::Fixed(100.0))
-                        .height(Length::Fixed(28.0))
-                        .padding(0.0)
-                        .style(lpm_nav_settings_move_button_style)
-                        .on_press(Message::CheckProgramUpdate)
-                    },
-                ]
-                .spacing(10)
-                .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .padding([4.0, 0.0]),
-            container(
-                row![
-                    column![
-                        text("피드백")
-                            .size(22)
-                            .font(lpm_bold_font()),
-                        text("의견을 주시면 프로그램이 완벽해질 수 있습니다.")
-                            .size(12),
-                    ]
-                    .spacing(6)
-                    .width(Length::Fill),
-                    button(
-                        container(text("이동").size(12))
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .align_x(iced::alignment::Horizontal::Center)
-                            .align_y(iced::alignment::Vertical::Center),
-                    )
-                    .width(Length::Fixed(100.0))
-                    .height(Length::Fixed(28.0))
-                    .padding(0.0)
-                    .style(lpm_nav_settings_move_button_style)
-                    .on_press(Message::OpenFeedback),
-                ]
-                .spacing(10)
-                .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .padding([4.0, 0.0]),
-        ]
-        .spacing(24),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .padding([18.0, 16.0])
-    .style(lpm_nav_settings_panel_style);
-
-    let main_stack = match self.active_nav {
-        NavPage::Dashboard => column![self.dashboard_panel()],
-        NavPage::Rom => column![header, rom_panel],
-        NavPage::Backup => column![header, image_panel, backup_panel, log_section],
-        NavPage::Driver => column![header, driver_panel],
-        NavPage::FirmwareDownload => column![header, settings_panel],
-        NavPage::Qna => column![header, settings_panel],
-        NavPage::Log => column![header, log_section],
-        NavPage::Settings => column![header, settings_panel],
+            self.gbst_page_header(page_title,page_subtitle),
+            container(main_body).width(Length::Fill)
+                .height(Length::Fill).style(shell_main_style)
+        ].height(Length::Fill).spacing(0)
+    };
+    let main = container(page_column).width(Length::Fill).height(Length::Fill);
+    let row_area: Element<'_, Message> = if self.window_is_compact() {
+        let placeholder = container(Space::new())
+            .width(Length::Fixed(SIDEBAR_RAIL_WIDTH))
+            .height(Length::Fill);
+        let base = row![placeholder,main].width(Length::Fill).height(Length::Fill);
+        iced::widget::Stack::with_children(vec![base.into(),self.gbst_sidebar()])
+            .width(Length::Fill).height(Length::Fill).into()
+    } else {
+        row![self.gbst_sidebar(),main].width(Length::Fill).height(Length::Fill).into()
+    };
+    let frame: Element<'_, Message> = column![row_area,self.gbst_footer()]
+        .width(Length::Fill).height(Length::Fill).spacing(0).into();
+    let mut layers: Vec<Element<'_, Message>> = vec![frame];
+    if self.should_show_dashboard_update_notice() {
+        layers.push(self.dashboard_update_notice_view());
     }
-    .spacing(10)
-    .width(Length::Fill)
-    .height(Length::Fill);
-
-    let footer = container(
-        row![
-            iced_text(format!("● {status}")).size(12).width(Length::Fill),
-            iced_text(format!("v{APP_DISPLAY_VERSION}")).size(12).width(Length::Fixed(60.0)).align_x(iced::alignment::Horizontal::Right),
-        ]
-        .spacing(10),
-    )
-    .width(Length::Fill)
-    .padding([6.0, 12.0])
-    .style(lpm_nav_footer_style);
-
-    let main_content = container(column![
-        container(main_stack)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(12)
-            .style(lpm_nav_app_background_style),
-        footer,
-    ])
-    .width(Length::Fill)
-    .height(Length::Fill);
-
-    let rail_placeholder = container(iced::widget::Space::new())
-        .width(Length::Fixed(SIDEBAR_RAIL_WIDTH))
-        .height(Length::Fill);
-
-    let row_base = row![rail_placeholder, main_content].height(Length::Fill);
-
-let mut layers: Vec<Element<'_, Message>> = vec![row_base.into(), self.sidebar()];
-
-if self.rom_country_popup_open {
-    layers.push(self.rom_country_popup_view());
-}
-
-if self.rom_should_show_vc_runtime_popup() {
-    layers.push(self.rom_vc_runtime_popup_view());
-} else if self.rom_should_show_mtk_driver_popup() {
-    layers.push(self.rom_mtk_driver_popup_view());
-}
-
-if self.should_show_dashboard_update_notice() {
-    layers.push(self.dashboard_update_notice_view());
-}
-
-let stacked = iced::widget::Stack::with_children(layers)
-    .width(Length::Fill)
-    .height(Length::Fill);
-
-stacked.into()
+    if self.license_dialog_open {
+        layers.push(self.gbst_license_popup());
+    }
+    if self.log_cleanup_confirmation_open {
+        layers.push(self.gbst_confirm_cleanup_popup(true));
+    }
+    if self.cache_cleanup_confirmation_open {
+        layers.push(self.gbst_confirm_cleanup_popup(false));
+    }
+    if self.rom_country_popup_open {
+        layers.push(self.rom_country_popup_view());
+    }
+    if self.rom_should_show_vc_runtime_popup() {
+        layers.push(self.rom_vc_runtime_popup_view());
+    } else if self.rom_should_show_mtk_driver_popup() {
+        layers.push(self.rom_mtk_driver_popup_view());
+    }
+    iced::widget::Stack::with_children(layers)
+        .width(Length::Fill).height(Length::Fill).into()
 }
 
 fn nav_icon_handle(&self, page: NavPage) -> iced::widget::image::Handle {
@@ -8049,12 +8022,86 @@ fn nav_icon_handle(&self, page: NavPage) -> iced::widget::image::Handle {
         NavPage::Qna => self.nav_qna_handle.clone(),
         NavPage::Log => self.nav_log_handle.clone(),
         NavPage::Settings => self.nav_settings_handle.clone(),
+        NavPage::About => self.nav_tab_settings_handle.clone(),
         NavPage::Backup => self.nav_log_handle.clone(),
     }
 }
 
+fn cache_cleanup_popup_view(&self) -> Element<'_, Message> {
+    let content = container(column![
+        text(self.catalog("cache.title")).size(20).font(lpm_bold_font()),
+        text(self.catalog("cache.warning")).size(13),
+        row![
+            button(text(self.catalog("common.cancel"))).on_press(Message::CancelCacheCleanup),
+            button(text(self.catalog("cache.clean"))).on_press(Message::ConfirmCacheCleanup),
+        ].spacing(12),
+    ].spacing(16))
+    .padding(24).width(Length::Fixed(500.0))
+    .style(lpm_nav_settings_panel_style);
+    container(content)
+        .width(Length::Fill).height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(|_| container::Style {
+            background: Some(Background::Color(Color::from_rgba8(12, 14, 20, 0.72))),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+fn license_popup_view(&self) -> Element<'_, Message> {
+    let body = container(
+        column![
+            text(self.catalog("about.title")).size(22).font(lpm_bold_font()),
+            text("LPMBox - GPL-3.0-only").size(13),
+            scrollable(text(include_str!("../../../LICENSE")).size(11))
+                .height(Length::Fill).width(Length::Fill),
+            button(text(self.catalog("common.close"))).on_press(Message::CloseLicenseDialog),
+        ].spacing(12),
+    )
+    .width(Length::Fixed(700.0))
+    .height(Length::Fixed(565.0))
+    .padding(20)
+    .style(lpm_nav_settings_panel_style);
+    container(body)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(|_| container::Style {
+            background: Some(Background::Color(Color::from_rgba8(12, 14, 20, 0.72))),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+fn log_cleanup_popup_view(&self) -> Element<'_, Message> {
+    let content = container(column![
+        text(self.catalog("logs.cleanup")).size(20).font(lpm_bold_font()),
+        text(self.catalog("logs.cleanup.description")).size(14),
+        text(self.catalog("logs.cleanup.warning")).size(12),
+        row![
+            button(text(self.catalog("common.cancel"))).on_press(Message::CancelSavedLogCleanup),
+            button(text(self.catalog("logs.cleanup.confirm"))).on_press(Message::ConfirmSavedLogCleanup),
+        ].spacing(12),
+    ].spacing(16))
+    .padding(24).width(Length::Fixed(480.0))
+    .style(lpm_nav_settings_panel_style);
+    container(content)
+        .width(Length::Fill).height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(|_| container::Style {
+            background: Some(Background::Color(Color::from_rgba8(12, 14, 20, 0.72))),
+            ..container::Style::default()
+        })
+        .into()
+}
+
 fn sidebar(&self) -> Element<'_, Message> {
-    let label_t = ((self.sidebar_anim - 0.4) / 0.5).clamp(0.0, 1.0);
+    let label_t = if self.window_is_compact() {
+        ((self.sidebar_anim - 0.4) / 0.5).clamp(0.0, 1.0)
+    } else { 1.0 };
     let label_alpha = ease_out_cubic(label_t);
 
     let mut nav = column![].spacing(1).padding([16.0, 0.0]);
@@ -8083,8 +8130,11 @@ fn sidebar(&self) -> Element<'_, Message> {
         ));
     }
 
-    let width =
-        SIDEBAR_RAIL_WIDTH + (SIDEBAR_EXPANDED_WIDTH - SIDEBAR_RAIL_WIDTH) * self.sidebar_anim;
+    let width = if self.window_is_compact() {
+        SIDEBAR_RAIL_WIDTH + (SIDEBAR_EXPANDED_WIDTH - SIDEBAR_RAIL_WIDTH) * self.sidebar_anim
+    } else {
+        SIDEBAR_EXPANDED_WIDTH
+    };
 
     let panel = container(nav)
         .width(Length::Fixed(width))
@@ -8106,12 +8156,11 @@ fn sidebar(&self) -> Element<'_, Message> {
         .into()
 }
 
+fn window_is_compact(&self) -> bool {
+    self.window_size.0 < 1080.0
+}
 fn sidebar_anim_target(&self) -> f32 {
-    if self.sidebar_expanded {
-        1.0
-    } else {
-        0.0
-    }
+    if self.window_is_compact() && self.sidebar_expanded { 1.0 } else { 0.0 }
 }
 
 fn dashboard_panel(&self) -> Element<'_, Message> {
@@ -8260,6 +8309,10 @@ let info_grid = row![column1, column2, column3]
 fn rom_image_folder_select_panel(&self) -> Element<'_, Message> {
     let content: Element<'_, Message> = if let Some(image_dir) = &self.image_dir {
         self.rom_after_folder_selected_panel(image_dir.display().to_string())
+    } else if let Some(error) = &self.rom_firmware_error {
+        column![self.rom_select_folder_card(), self.rom_firmware_error_panel(error)]
+            .spacing(14)
+            .into()
     } else {
         self.rom_select_folder_card()
     };
@@ -8535,7 +8588,7 @@ fn rom_image_info_dashboard_panel(
         .width(Length::Fixed(390.0))
         .height(Length::Fixed(262.0))
         .padding(14)
-        .style(move |_theme: &Theme| lpm_nav_rom_status_card_style(folder_problem));
+        .style(move |theme: &Theme| lpm_nav_rom_status_card_style(theme, folder_problem));
 
     let tablet_icon_line = row![
         container(
@@ -8577,7 +8630,7 @@ fn rom_image_info_dashboard_panel(
         .width(Length::Fixed(275.0))
         .height(Length::Fixed(126.0))
         .padding(10)
-        .style(move |_theme: &Theme| lpm_nav_rom_status_card_style(connected_problem));
+        .style(move |theme: &Theme| lpm_nav_rom_status_card_style(theme, connected_problem));
 
     let battery_icon_line = row![
         container(
@@ -8619,7 +8672,7 @@ fn rom_image_info_dashboard_panel(
         .width(Length::Fixed(275.0))
         .height(Length::Fixed(126.0))
         .padding(10)
-        .style(move |_theme: &Theme| lpm_nav_rom_status_card_style(battery_problem));
+        .style(move |theme: &Theme| lpm_nav_rom_status_card_style(theme, battery_problem));
 
     let right_column = column![right_top, right_bottom]
         .spacing(10)
@@ -9745,21 +9798,22 @@ fn rom_country_popup_view(&self) -> Element<'_, Message> {
                 .padding([6.0, 14.0])
                 .width(Length::Fill)
                 .on_press(Message::RomSelectCountry(code))
-                .style(move |_theme: &Theme, status| {
+                .style(move |theme: &Theme, status| {
                     let hovered = matches!(status, iced::widget::button::Status::Hovered);
+                    let colors = lpm_shell_palette(theme);
 
                     iced::widget::button::Style {
                         background: if selected {
-                            Some(Background::Color(Color::from_rgb8(73, 89, 255)))
+                            Some(Background::Color(colors.accent))
                         } else if hovered {
-                            Some(Background::Color(Color::from_rgb8(239, 241, 250)))
+                            Some(Background::Color(colors.subtle))
                         } else {
                             None
                         },
                         text_color: if selected {
-                            Color::from_rgb8(255, 255, 255)
+                            Color::WHITE
                         } else {
-                            Color::from_rgb8(32, 35, 47)
+                            colors.text
                         },
                         border: iced::Border {
                             radius: 8.0.into(),
@@ -12953,15 +13007,11 @@ fn progress_bar(percent: u8) -> String {
     format!("[{}{}] {}%", "█".repeat(filled), "·".repeat(empty), percent)
 }
 
-fn lpm_nav_rom_validation_log_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_rom_validation_log_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(238, 238, 238))),
-        text_color: Some(Color::from_rgb8(20, 20, 20)),
-        border: iced::Border {
-            radius: 0.0.into(),
-            width: 0.0,
-            color: Color::TRANSPARENT,
-        },
+        background: Some(Background::Color(c.subtle)),
+        text_color: Some(c.text),
         ..container::Style::default()
     }
 }
@@ -12981,63 +13031,32 @@ fn lpm_nav_disabled_next_button_style(
     }
 }
 
-fn lpm_nav_rom_status_card_style(has_error: bool) -> container::Style {
+fn lpm_nav_rom_status_card_style(theme: &Theme, has_error: bool) -> container::Style {
     if has_error {
-        container::Style {
-            background: Some(Background::Color(Color::from_rgb8(255, 170, 170))),
-            text_color: Some(Color::from_rgb8(32, 35, 47)),
-            border: iced::Border {
-                radius: 14.0.into(),
-                width: 1.0,
-                color: Color::from_rgb8(230, 138, 138),
-            },
-            ..container::Style::default()
-        }
+        let mut card = lpm_nav_rom_error_card_style(theme);
+        card.border.radius = 14.0.into();
+        card
     } else {
-        container::Style {
-            background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-            text_color: Some(Color::from_rgb8(32, 35, 47)),
-            border: iced::Border {
-                radius: 14.0.into(),
-                width: 1.0,
-                color: Color::from_rgb8(222, 225, 236),
-            },
-            ..container::Style::default()
-        }
+        lpm_shell_card(theme, 14.0)
     }
 }
 
 
 
-fn lpm_nav_rom_option_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 12.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_option_card_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 12.0);
+    style
 }
 
-fn lpm_nav_rom_country_popup_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 18.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        shadow: iced::Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.22),
-            offset: iced::Vector::new(0.0, 8.0),
-            blur_radius: 24.0,
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_country_popup_card_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 18.0);
+
+    style.shadow = iced::Shadow {
+        color: Color::from_rgba(0.0, 0.0, 0.0, 0.22),
+        offset: iced::Vector::new(0.0, 8.0),
+        blur_radius: 24.0,
+    };
+    style
 }
 
 fn lpm_nav_rom_country_popup_scrim_style(_theme: &Theme) -> container::Style {
@@ -13047,22 +13066,15 @@ fn lpm_nav_rom_country_popup_scrim_style(_theme: &Theme) -> container::Style {
     }
 }
 
-fn lpm_nav_dashboard_update_popup_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 8.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        shadow: iced::Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
-            offset: iced::Vector::new(0.0, 8.0),
-            blur_radius: 24.0,
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_dashboard_update_popup_card_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 8.0);
+
+    style.shadow = iced::Shadow {
+        color: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
+        offset: iced::Vector::new(0.0, 8.0),
+        blur_radius: 24.0,
+    };
+    style
 }
 
 fn lpm_nav_dashboard_update_popup_scrim_style(_theme: &Theme) -> container::Style {
@@ -13072,22 +13084,15 @@ fn lpm_nav_dashboard_update_popup_scrim_style(_theme: &Theme) -> container::Styl
     }
 }
 
-fn lpm_nav_mtk_driver_popup_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 13.0.into(),
-            width: 2.0,
-            color: Color::from_rgb8(177, 181, 198),
-        },
-        shadow: iced::Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.30),
-            offset: iced::Vector::new(0.0, 10.0),
-            blur_radius: 26.0,
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_mtk_driver_popup_card_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 13.0);
+
+    style.shadow = iced::Shadow {
+        color: Color::from_rgba(0.0, 0.0, 0.0, 0.30),
+        offset: iced::Vector::new(0.0, 8.0),
+        blur_radius: 26.0,
+    };
+    style
 }
 
 fn lpm_nav_mtk_driver_popup_scrim_style(_theme: &Theme) -> container::Style {
@@ -13098,43 +13103,31 @@ fn lpm_nav_mtk_driver_popup_scrim_style(_theme: &Theme) -> container::Style {
 }
 
 
-fn lpm_nav_rom_routine_row_disabled_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_rom_routine_row_disabled_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
+    let dark = c.page.r + c.page.g + c.page.b < 1.55;
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 235, 235))),
-        text_color: Some(Color::from_rgb8(120, 45, 45)),
+        background: Some(Background::Color(if dark { Color::from_rgb8(82, 42, 45) }
+                                             else { Color::from_rgb8(255, 235, 235) })),
+        text_color: Some(if dark { Color::from_rgb8(255, 207, 207) }
+                         else { Color::from_rgb8(120, 45, 45) }),
         border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(238, 150, 150),
+            radius: 14.0.into(), width: 1.0,
+            color: if dark { Color::from_rgb8(152, 78, 83) }
+                   else { Color::from_rgb8(238, 150, 150) },
         },
         ..container::Style::default()
     }
 }
 
-fn lpm_nav_rom_routine_row_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_routine_row_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 14.0);
+    style
 }
 
-fn lpm_nav_rom_routine_slide_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_routine_slide_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 14.0);
+    style
 }
 
 
@@ -13142,128 +13135,89 @@ fn lpm_nav_rom_routine_slide_style(_theme: &Theme) -> container::Style {
 
 
 fn lpm_nav_additional_option_button_style(
-    _theme: &Theme,
+    theme: &Theme,
     _status: iced::widget::button::Status,
 ) -> button::Style {
+    let c = lpm_shell_palette(theme);
     button::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Color::from_rgb8(32, 35, 47),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        shadow: iced::Shadow {
-            color: Color::TRANSPARENT,
-            offset: iced::Vector::new(0.0, 0.0),
-            blur_radius: 0.0,
-        },
+        background: Some(Background::Color(c.panel)),
+        text_color: c.text,
+        border: iced::Border { radius: 14.0.into(), width: 1.0, color: c.border },
         ..button::Style::default()
     }
 }
 
 fn lpm_nav_flat_button_style(
-    _theme: &Theme,
+    theme: &Theme,
     _status: iced::widget::button::Status,
 ) -> button::Style {
     button::Style {
-        background: None,
-        text_color: Color::from_rgb8(32, 35, 47),
-        border: iced::Border::default(),
-        ..button::Style::default()
+        background: None, text_color: lpm_shell_palette(theme).text,
+        border: iced::Border::default(), ..button::Style::default()
     }
 }
 
-fn lpm_nav_rom_select_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.2,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_select_card_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 14.0);
+    style
 }
 
-fn lpm_nav_rom_step_panel_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.2,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_step_panel_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 14.0);
+    style
 }
 
-fn lpm_nav_rom_step_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 12.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_step_card_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 12.0);
+    style
 }
 
-fn lpm_nav_rom_error_card_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_rom_error_card_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
+    let dark = c.page.r + c.page.g + c.page.b < 1.55;
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 246, 246))),
-        text_color: Some(Color::from_rgb8(122, 32, 32)),
+        background: Some(Background::Color(if dark { Color::from_rgb8(74, 38, 42) }
+                                             else { Color::from_rgb8(255, 246, 246) })),
+        text_color: Some(if dark { Color::from_rgb8(255, 204, 204) }
+                         else { Color::from_rgb8(122, 32, 32) }),
         border: iced::Border {
-            radius: 12.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(240, 198, 198),
+            radius: 12.0.into(), width: 1.0,
+            color: if dark { Color::from_rgb8(151, 83, 83) }
+                   else { Color::from_rgb8(240, 198, 198) },
         },
         ..container::Style::default()
     }
 }
 
 fn lpm_nav_language_pick_list_style(
-    _theme: &Theme,
+    theme: &Theme,
     status: iced::widget::pick_list::Status,
 ) -> iced::widget::pick_list::Style {
+    let c = lpm_shell_palette(theme);
+    let dark = c.page.r + c.page.g + c.page.b < 1.55;
     let active = iced::widget::pick_list::Style {
-        text_color: Color::from_rgb8(32, 35, 47),
-        placeholder_color: Color::from_rgb8(92, 96, 112),
-        handle_color: Color::from_rgb8(32, 35, 47),
-        background: Background::Color(Color::from_rgb8(227, 227, 227)),
-        border: iced::Border {
-            radius: 0.0.into(),
-            width: 0.0,
-            color: Color::TRANSPARENT,
-        },
+        text_color: c.text, placeholder_color: c.muted, handle_color: c.text,
+        background: Background::Color(if dark { c.subtle } else { Color::from_rgb8(227,227,227) }),
+        border: iced::Border { radius: 7.0.into(), width: 1.0, color: c.border },
     };
-
     match status {
         iced::widget::pick_list::Status::Active => active,
-        iced::widget::pick_list::Status::Hovered | iced::widget::pick_list::Status::Opened { .. } => {
+        iced::widget::pick_list::Status::Hovered |
+        iced::widget::pick_list::Status::Opened { .. } =>
             iced::widget::pick_list::Style {
-                background: Background::Color(Color::from_rgb8(227, 227, 227)),
+                background: Background::Color(if dark { c.panel } else { Color::from_rgb8(227,227,227) }),
                 ..active
-            }
-        }
+            },
     }
 }
 
-fn lpm_nav_language_pick_list_menu_style(_theme: &Theme) -> iced::widget::overlay::menu::Style {
+fn lpm_nav_language_pick_list_menu_style(theme: &Theme) -> iced::widget::overlay::menu::Style {
+    let c = lpm_shell_palette(theme);
     iced::widget::overlay::menu::Style {
-        background: Background::Color(Color::from_rgb8(255, 255, 255)),
-        border: iced::Border {
-            radius: 0.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        text_color: Color::from_rgb8(32, 35, 47),
-        selected_text_color: Color::from_rgb8(32, 35, 47),
-        selected_background: Background::Color(Color::from_rgb8(238, 240, 250)),
+        background: Background::Color(c.panel),
+        border: iced::Border { radius: 8.0.into(), width: 1.0, color: c.border },
+        text_color: c.text, selected_text_color: c.text,
+        selected_background: Background::Color(c.subtle),
         shadow: iced::Shadow::default(),
     }
 }
@@ -13289,24 +13243,13 @@ fn lpm_nav_settings_move_button_style(
     }
 }
 fn lpm_nav_rom_card_button_style(
-    _theme: &Theme,
-    status: iced::widget::button::Status,
+    theme: &Theme,
+    _status: iced::widget::button::Status,
 ) -> iced::widget::button::Style {
-    let shadow_offset = if matches!(status, iced::widget::button::Status::Pressed) {
-        iced::Vector::new(0.0, 0.0)
-    } else {
-        iced::Vector::new(0.0, 0.0)
-    };
-
     iced::widget::button::Style {
         background: None,
-        text_color: Color::from_rgb8(25, 27, 36),
+        text_color: lpm_shell_palette(theme).text,
         border: iced::Border::default(),
-        shadow: iced::Shadow {
-            color: Color::TRANSPARENT,
-            offset: shadow_offset,
-            blur_radius: 0.0,
-        },
         ..iced::widget::button::Style::default()
     }
 }
@@ -13323,141 +13266,130 @@ fn lpm_nav_dashboard_black_screen_style(_theme: &Theme) -> container::Style {
     }
 }
 
-fn lpm_nav_app_background_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(248, 248, 252))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        ..container::Style::default()
+// GBST 2.0.0 Material-style shell palette, adapted to LPMBox firmware UI.
+#[derive(Clone, Copy)]
+struct LpmShellPalette {
+    page: Color,
+    sidebar: Color,
+    panel: Color,
+    subtle: Color,
+    text: Color,
+    muted: Color,
+    border: Color,
+    accent: Color,
+    log: Color,
+}
+fn lpm_shell_palette(theme: &Theme) -> LpmShellPalette {
+    let p = theme.palette();
+    let dark = p.background.r + p.background.g + p.background.b < 1.55;
+    LpmShellPalette {
+        page: p.background,
+        sidebar: if dark { Color::from_rgb8(27, 27, 33) }
+                 else { Color::from_rgb8(246, 246, 251) },
+        panel: if dark { Color::from_rgb8(32, 31, 38) }
+               else { Color::from_rgb8(255, 255, 255) },
+        subtle: if dark { Color::from_rgb8(42, 41, 48) }
+                else { Color::from_rgb8(239, 239, 246) },
+        text: p.text,
+        muted: if dark { Color::from_rgb8(199, 197, 208) }
+               else { Color::from_rgb8(113, 116, 130) },
+        border: if dark { Color::from_rgb8(71, 70, 79) }
+                else { Color::from_rgb8(222, 225, 236) },
+        accent: p.primary,
+        log: if dark { Color::from_rgb8(24, 25, 31) }
+             else { Color::from_rgb8(244, 244, 249) },
     }
 }
-
-fn lpm_nav_menu_panel_style(_theme: &Theme) -> container::Style {
+fn lpm_shell_card(theme: &Theme, radius: f32) -> container::Style {
+    let colors = lpm_shell_palette(theme);
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(246, 246, 251))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        ..container::Style::default()
-    }
-}
-
-fn lpm_nav_section_label_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(239, 239, 246))),
-        text_color: Some(Color::from_rgb8(113, 116, 130)),
-        ..container::Style::default()
-    }
-}
-
-fn lpm_nav_divider_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(210, 212, 224))),
-        ..container::Style::default()
-    }
-}
-
-fn lpm_nav_footer_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(246, 246, 251))),
-        text_color: Some(Color::from_rgb8(45, 48, 62)),
-        ..container::Style::default()
-    }
-}
-
-fn lpm_nav_header_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(28, 31, 45)),
+        background: Some(Background::Color(colors.panel)),
+        text_color: Some(colors.text),
         border: iced::Border {
-            radius: 0.0.into(),
-            width: 1.2,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
-}
-
-fn lpm_nav_settings_panel_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 12.0.into(),
+            radius: radius.into(),
             width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
+            color: colors.border,
         },
         ..container::Style::default()
     }
 }
-
-fn lpm_nav_panel_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_app_background_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
+        background: Some(Background::Color(c.page)),
+        text_color: Some(c.text),
         ..container::Style::default()
     }
 }
-
-
-fn lpm_nav_extra_option_card_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_menu_panel_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
+        background: Some(Background::Color(c.sidebar)),
+        text_color: Some(c.text),
         ..container::Style::default()
     }
 }
-
-
-fn lpm_nav_status_idle_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_section_label_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(222, 244, 231))),
-        text_color: Some(Color::from_rgb8(23, 104, 59)),
+        background: Some(Background::Color(c.subtle)),
+        text_color: Some(c.muted),
         ..container::Style::default()
     }
 }
-
-fn lpm_nav_status_busy_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_divider_style(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 238, 214))),
-        text_color: Some(Color::from_rgb8(150, 82, 20)),
+        background: Some(Background::Color(lpm_shell_palette(theme).border)),
         ..container::Style::default()
     }
 }
-
-
-fn lpm_nav_dashboard_inner_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_footer_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 12.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
+        background: Some(Background::Color(c.sidebar)),
+        text_color: Some(c.text),
         ..container::Style::default()
     }
 }
-
-fn lpm_nav_dashboard_action_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_header_style(theme: &Theme) -> container::Style {
+    lpm_shell_card(theme, 8.0)
+}
+fn lpm_nav_settings_panel_style(theme: &Theme) -> container::Style {
+    lpm_shell_card(theme, 14.0)
+}
+fn lpm_nav_panel_style(theme: &Theme) -> container::Style {
+    lpm_shell_card(theme, 12.0)
+}
+fn lpm_nav_extra_option_card_style(theme: &Theme) -> container::Style {
+    lpm_shell_card(theme, 14.0)
+}
+fn lpm_nav_status_idle_style(theme: &Theme) -> container::Style {
+    let dark = theme.palette().background.r < 0.4;
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 12.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(210, 214, 228),
-        },
+        background: Some(Background::Color(if dark { Color::from_rgb8(35, 74, 54) } else { Color::from_rgb8(222, 244, 231) })),
+        text_color: Some(if dark { Color::from_rgb8(173, 230, 188) } else { Color::from_rgb8(23, 104, 59) }),
         ..container::Style::default()
     }
 }
-
-fn log_container_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_status_busy_style(theme: &Theme) -> container::Style {
+    let dark = theme.palette().background.r < 0.4;
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(238, 238, 238))),
-        text_color: Some(Color::from_rgb8(20, 20, 20)),
+        background: Some(Background::Color(if dark { Color::from_rgb8(91, 61, 37) } else { Color::from_rgb8(255, 238, 214) })),
+        text_color: Some(if dark { Color::from_rgb8(255, 211, 153) } else { Color::from_rgb8(150, 82, 20) }),
+        ..container::Style::default()
+    }
+}
+fn lpm_nav_dashboard_inner_style(theme: &Theme) -> container::Style {
+    lpm_shell_card(theme, 14.0)
+}
+fn lpm_nav_dashboard_action_style(theme: &Theme) -> container::Style {
+    lpm_shell_card(theme, 14.0)
+}
+fn log_container_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
+    container::Style {
+        background: Some(Background::Color(c.log)),
+        text_color: Some(c.text),
         ..container::Style::default()
     }
 }
@@ -13974,4 +13906,23 @@ mod lpm_i18n_tests {
         }
     }
 
+}
+
+
+#[cfg(test)]
+mod image_folder_resolution_tests {
+    use super::*;
+    #[test]
+    fn image_folder_picker_resolves_parent_and_leaf_without_guessing_elsewhere() {
+        let base = std::env::temp_dir()
+            .join(format!("lpmbox_image_picker_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("firmware/image")).unwrap();
+        let parent = base.join("firmware");
+        let leaf = parent.join("image");
+        assert_eq!(resolve_image_folder_selection(&parent).unwrap(), leaf);
+        assert_eq!(resolve_image_folder_selection(&leaf).unwrap(), leaf);
+        assert!(resolve_image_folder_selection(&base).is_err());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }

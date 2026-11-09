@@ -1,0 +1,21 @@
+{
+  "project": "LPMBox",
+  "source_version": "3.1.2",
+  "gui_baseline": "GBST 2.0.0",
+  "generated_at": "2026-11-09",
+  "original_lpm_git_sha": "404953a40dd954b2a435b98292c1438fbc1dc1b0",
+  "gbst_git_sha": "3d5bc964f6c7f92e6f1e52c4399a6b93031b41a2",
+  "build_command": "cargo build --release -p lpmbox-gui --offline",
+  "build_status": "success",
+  "tests_command": "cargo test --workspace --offline --quiet",
+  "tests_status": "25 passed; 0 failed (2 core, 23 GUI)",
+  "locale_count": 12,
+  "json_entries_per_locale": 393,
+  "firmware_device_spft_git_diff": "unchanged",
+  "windows_exe_bytes": 46231552,
+  "windows_exe_sha256": "81575CCF039FE9ACB69BA6934BE6D2A12C9EF0C478D829C01347C40F66542A66",
+  "license_identifier": "GPL-3.0-only (owned original source only; third-party rights preserved)",
+  "release_status": "local GUI beta - ROM flashing not live tested",
+  "git_remote_pushed": false,
+  "tablet_modified": false
+}

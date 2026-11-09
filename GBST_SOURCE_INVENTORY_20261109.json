@@ -1,0 +1,1364 @@
+{
+  "date": "2026-11-09",
+  "gbst_source_commit": "3d5bc964f6c7f92e6f1e52c4399a6b93031b41a2",
+  "lpmbox_original_branch": "backup/pre-gbst-v2-port-20261109",
+  "source_tracked_files_examined": 190,
+  "by_status": {
+    "NOT_PORTED": 126,
+    "LICENSE_MATCHED": 1,
+    "PURPOSE_SPECIFIC_BACKEND_NOT_COPIED": 2,
+    "ARCHITECTURE_ADAPTED": 1,
+    "ALL_GBST_LOCALE_KEYS_MERGED": 12,
+    "GBST_SPECIFIC_BACKEND_UNCHANGED": 9,
+    "I18N_DATA_MERGED_BACKEND_PRESERVED": 2,
+    "ASSET_REVIEWED_NOT_COPIED": 27,
+    "ASSET_COPIED": 5,
+    "MODULE_ADAPTED": 3,
+    "GUI_RENDERER_PORTED": 1,
+    "GUI_CONTROLLER_ADAPTED": 1
+  },
+  "files": [
+    {
+      "source": "Cargo.lock",
+      "bytes": 153388,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "Cargo.toml",
+      "bytes": 826,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "LICENSE",
+      "bytes": 34674,
+      "category": "GBST_BUILD_DOCS",
+      "status": "LICENSE_MATCHED",
+      "mapping": "LPM LICENSE: same GPL-3.0-only license text as GBST v2.0.0"
+    },
+    {
+      "source": "README.md",
+      "bytes": 1687,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "crates/gbst-adb/Cargo.toml",
+      "bytes": 261,
+      "category": "GBST_BUILD_DOCS",
+      "status": "PURPOSE_SPECIFIC_BACKEND_NOT_COPIED",
+      "mapping": "GBST direct USB/GMS install engine intentionally not copied into MTK ROM recovery tool"
+    },
+    {
+      "source": "crates/gbst-adb/src/lib.rs",
+      "bytes": 114946,
+      "category": "GBST_ADB",
+      "status": "PURPOSE_SPECIFIC_BACKEND_NOT_COPIED",
+      "mapping": "GBST direct USB/GMS install engine intentionally not copied into MTK ROM recovery tool"
+    },
+    {
+      "source": "crates/gbst-core/Cargo.toml",
+      "bytes": 354,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "crates/gbst-core/lang/README_KO.md",
+      "bytes": 2824,
+      "category": "GBST_LANG",
+      "status": "ARCHITECTURE_ADAPTED",
+      "mapping": "File-based locale architecture reimplemented for 12 LPMBox catalogs, Google APK content intentionally excluded"
+    },
+    {
+      "source": "crates/gbst-core/lang/ar.json",
+      "bytes": 29710,
+      "category": "GBST_LANG",
+      "status": "ALL_GBST_LOCALE_KEYS_MERGED",
+      "mapping": "Merged all GBST UI keys into LPM crates/lpmbox-core/lang/ar.json, preserving existing LPM keys"
+    },
+    {
+      "source": "crates/gbst-core/lang/el.json",
+      "bytes": 35382,
+      "category": "GBST_LANG",
+      "status": "ALL_GBST_LOCALE_KEYS_MERGED",
+      "mapping": "Merged all GBST UI keys into LPM crates/lpmbox-core/lang/el.json, preserving existing LPM keys"
+    },
+    {
+      "source": "crates/gbst-core/lang/en.json",
+      "bytes": 23733,
+      "category": "GBST_LANG",
+      "status": "ALL_GBST_LOCALE_KEYS_MERGED",
+      "mapping": "Merged all GBST UI keys into LPM crates/lpmbox-core/lang/en.json, preserving existing LPM keys"
+    },
+    {
+      "source": "crates/gbst-core/lang/es.json",
+      "bytes": 25775,
+      "category": "GBST_LANG",
+      "status": "ALL_GBST_LOCALE_KEYS_MERGED",
+      "mapping": "Merged all GBST UI keys into LPM crates/lpmbox-core/lang/es.json, preserving existing LPM keys"
+    },
+    {
+      "source": "crates/gbst-core/lang/hi.json",
+      "bytes": 39123,
+      "category": "GBST_LANG",
+      "status": "ALL_GBST_LOCALE_KEYS_MERGED",
+      "mapping": "Merged all GBST UI keys into LPM crates/lpmbox-core/lang/hi.json, preserving existing LPM keys"
+    },
+    {
+      "source": "crates/gbst-core/lang/ja.json",
+      "bytes": 28141,
+      "category": "GBST_LANG",
+      "status": "ALL_GBST_LOCALE_KEYS_MERGED",
+      "mapping": "Merged all GBST UI keys into LPM crates/lpmbox-core/lang/ja.json, preserving existing LPM keys"
+    },
+    {
+      "source": "crates/gbst-core/lang/ka.json",
+      "bytes": 43547,
+      "category": "GBST_LANG",
+      "status": "ALL_GBST_LOCALE_KEYS_MERGED",
+      "mapping": "Merged all GBST UI keys into LPM crates/lpmbox-core/lang/ka.json, preserving existing LPM keys"
+    },
+    {
+      "source": "crates/gbst-core/lang/ko.json",
+      "bytes": 25509,
+      "category": "GBST_LANG",
+      "status": "ALL_GBST_LOCALE_KEYS_MERGED",
+      "mapping": "Merged all GBST UI keys into LPM crates/lpmbox-core/lang/ko.json, preserving existing LPM keys"
+    },
+    {
+      "source": "crates/gbst-core/lang/nl.json",
+      "bytes": 24448,
+      "category": "GBST_LANG",
+      "status": "ALL_GBST_LOCALE_KEYS_MERGED",
+      "mapping": "Merged all GBST UI keys into LPM crates/lpmbox-core/lang/nl.json, preserving existing LPM keys"
+    },
+    {
+      "source": "crates/gbst-core/lang/ru.json",
+      "bytes": 33656,
+      "category": "GBST_LANG",
+      "status": "ALL_GBST_LOCALE_KEYS_MERGED",
+      "mapping": "Merged all GBST UI keys into LPM crates/lpmbox-core/lang/ru.json, preserving existing LPM keys"
+    },
+    {
+      "source": "crates/gbst-core/lang/vi.json",
+      "bytes": 27463,
+      "category": "GBST_LANG",
+      "status": "ALL_GBST_LOCALE_KEYS_MERGED",
+      "mapping": "Merged all GBST UI keys into LPM crates/lpmbox-core/lang/vi.json, preserving existing LPM keys"
+    },
+    {
+      "source": "crates/gbst-core/lang/zh-TW.json",
+      "bytes": 23161,
+      "category": "GBST_LANG",
+      "status": "ALL_GBST_LOCALE_KEYS_MERGED",
+      "mapping": "Merged all GBST UI keys into LPM crates/lpmbox-core/lang/zh-TW.json, preserving existing LPM keys"
+    },
+    {
+      "source": "crates/gbst-core/src/apk_catalog.rs",
+      "bytes": 10463,
+      "category": "GBST_CORE",
+      "status": "GBST_SPECIFIC_BACKEND_UNCHANGED",
+      "mapping": "Separate Google service/APK implementation, not relevant to LPM ROM writes"
+    },
+    {
+      "source": "crates/gbst-core/src/apk_metadata.rs",
+      "bytes": 16702,
+      "category": "GBST_CORE",
+      "status": "GBST_SPECIFIC_BACKEND_UNCHANGED",
+      "mapping": "Separate Google service/APK implementation, not relevant to LPM ROM writes"
+    },
+    {
+      "source": "crates/gbst-core/src/downloader.rs",
+      "bytes": 29697,
+      "category": "GBST_CORE",
+      "status": "GBST_SPECIFIC_BACKEND_UNCHANGED",
+      "mapping": "Separate Google service/APK implementation, not relevant to LPM ROM writes"
+    },
+    {
+      "source": "crates/gbst-core/src/error.rs",
+      "bytes": 954,
+      "category": "GBST_CORE",
+      "status": "GBST_SPECIFIC_BACKEND_UNCHANGED",
+      "mapping": "Separate Google service/APK implementation, not relevant to LPM ROM writes"
+    },
+    {
+      "source": "crates/gbst-core/src/language.rs",
+      "bytes": 214639,
+      "category": "GBST_CORE",
+      "status": "I18N_DATA_MERGED_BACKEND_PRESERVED",
+      "mapping": "GBST language JSON keys merged, existing LPM ROM runtime localization preserved"
+    },
+    {
+      "source": "crates/gbst-core/src/lib.rs",
+      "bytes": 248,
+      "category": "GBST_CORE",
+      "status": "GBST_SPECIFIC_BACKEND_UNCHANGED",
+      "mapping": "Separate Google service/APK implementation, not relevant to LPM ROM writes"
+    },
+    {
+      "source": "crates/gbst-core/src/log_i18n.rs",
+      "bytes": 37505,
+      "category": "GBST_CORE",
+      "status": "I18N_DATA_MERGED_BACKEND_PRESERVED",
+      "mapping": "GBST language JSON keys merged, existing LPM ROM runtime localization preserved"
+    },
+    {
+      "source": "crates/gbst-core/src/model.rs",
+      "bytes": 4448,
+      "category": "GBST_CORE",
+      "status": "GBST_SPECIFIC_BACKEND_UNCHANGED",
+      "mapping": "Separate Google service/APK implementation, not relevant to LPM ROM writes"
+    },
+    {
+      "source": "crates/gbst-core/src/operation_i18n.rs",
+      "bytes": 44521,
+      "category": "GBST_CORE",
+      "status": "GBST_SPECIFIC_BACKEND_UNCHANGED",
+      "mapping": "Separate Google service/APK implementation, not relevant to LPM ROM writes"
+    },
+    {
+      "source": "crates/gbst-core/src/paths.rs",
+      "bytes": 4234,
+      "category": "GBST_CORE",
+      "status": "GBST_SPECIFIC_BACKEND_UNCHANGED",
+      "mapping": "Separate Google service/APK implementation, not relevant to LPM ROM writes"
+    },
+    {
+      "source": "crates/gbst-core/src/plan.rs",
+      "bytes": 23863,
+      "category": "GBST_CORE",
+      "status": "GBST_SPECIFIC_BACKEND_UNCHANGED",
+      "mapping": "Separate Google service/APK implementation, not relevant to LPM ROM writes"
+    },
+    {
+      "source": "crates/gbst-core/tests/runtime_log_source_samples.txt",
+      "bytes": 8677,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "crates/gbst-gui/Cargo.toml",
+      "bytes": 567,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icon.ico",
+      "bytes": 30289,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icon.png",
+      "bytes": 34474,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icons/about_gbst_repo.svg",
+      "bytes": 502,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_COPIED",
+      "mapping": "LPM crates/lpmbox-gui/assets/icons/ (source icon renamed for LPMBox)"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icons/about_issue.svg",
+      "bytes": 357,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_COPIED",
+      "mapping": "LPM crates/lpmbox-gui/assets/icons/ (source icon renamed for LPMBox)"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icons/about_ltbox.svg",
+      "bytes": 334,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_COPIED",
+      "mapping": "LPM crates/lpmbox-gui/assets/icons/ (source icon renamed for LPMBox)"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icons/nav_G.png",
+      "bytes": 21520,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icons/nav_home.png",
+      "bytes": 49461,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icons/nav_log.png",
+      "bytes": 72495,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icons/nav_settings.png",
+      "bytes": 72846,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icons/nav_tab_settings.png",
+      "bytes": 12436,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icons/tablet_check.png",
+      "bytes": 443022,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icons/tablet_fix.png",
+      "bytes": 652293,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icons/tablet_x.png",
+      "bytes": 449280,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/icons/waring.png",
+      "bytes": 423405,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/Etc.png",
+      "bytes": 19038,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_COPIED",
+      "mapping": "LPM crates/lpmbox-gui/assets/models/gbst_Etc.png (unknown tablet fallback)"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/Lenovo.png",
+      "bytes": 75052,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_COPIED",
+      "mapping": "LPM crates/lpmbox-gui/assets/models/gbst_Lenovo.png (unknown tablet fallback)"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB-9707F.png",
+      "bytes": 61023,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB320FC.png",
+      "bytes": 49230,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB321FC.png",
+      "bytes": 68380,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB322FC.png",
+      "bytes": 35566,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB323FC.png",
+      "bytes": 44402,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB324ZC.png",
+      "bytes": 293567,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB331FC.png",
+      "bytes": 85762,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB335FC.png",
+      "bytes": 75461,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB365FC.png",
+      "bytes": 79836,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB371FC.png",
+      "bytes": 106124,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB375FC.png",
+      "bytes": 85324,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB376FC.png",
+      "bytes": 84449,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB378FC.png",
+      "bytes": 60139,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB520FU.png",
+      "bytes": 103685,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB522FU.png",
+      "bytes": 111074,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/assets/models/TB710FU.png",
+      "bytes": 103191,
+      "category": "GBST_BUILD_DOCS",
+      "status": "ASSET_REVIEWED_NOT_COPIED",
+      "mapping": "LPMBox retains its own device models/icons/fonts; source image/assets where appropriate only"
+    },
+    {
+      "source": "crates/gbst-gui/build.rs",
+      "bytes": 350,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "crates/gbst-gui/src/appearance.rs",
+      "bytes": 7212,
+      "category": "GBST_GUI",
+      "status": "MODULE_ADAPTED",
+      "mapping": "LPM crates/lpmbox-gui/src/appearance.rs: theme and accent persistence"
+    },
+    {
+      "source": "crates/gbst-gui/src/cache_cleanup.rs",
+      "bytes": 5922,
+      "category": "GBST_GUI",
+      "status": "MODULE_ADAPTED",
+      "mapping": "LPM crates/lpmbox-gui/src/cache_cleanup.rs: only incomplete LPM download fragments"
+    },
+    {
+      "source": "crates/gbst-gui/src/log_cleanup.rs",
+      "bytes": 6273,
+      "category": "GBST_GUI",
+      "status": "MODULE_ADAPTED",
+      "mapping": "LPM crates/lpmbox-gui/src/log_cleanup.rs: safe deletion in LPM app namespace"
+    },
+    {
+      "source": "crates/gbst-gui/src/ltbox_visual.rs",
+      "bytes": 85468,
+      "category": "GBST_GUI",
+      "status": "GUI_RENDERER_PORTED",
+      "mapping": "LPM crates/lpmbox-gui/src/gbst_shell.rs: palette, pills, sidebar, header, dashboard, settings, About, license, progress"
+    },
+    {
+      "source": "crates/gbst-gui/src/main.rs",
+      "bytes": 158389,
+      "category": "GBST_GUI",
+      "status": "GUI_CONTROLLER_ADAPTED",
+      "mapping": "Root LPM main.rs now invokes GBST style shell while preserving ROM worker/controller"
+    },
+    {
+      "source": "rust-toolchain.toml",
+      "bytes": 31,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "scripts/audit_i18n.py",
+      "bytes": 2451,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/Cargo.toml",
+      "bytes": 2734,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/GBST_PATCH_NOTES.md",
+      "bytes": 2354,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/LICENSE",
+      "bytes": 1097,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/README.md",
+      "bytes": 2193,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/adb_device_ext.rs",
+      "bytes": 5067,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/adb_transport.rs",
+      "bytes": 309,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/emulator/adb_emulator_device.rs",
+      "bytes": 2682,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/emulator/commands/avd.rs",
+      "bytes": 678,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/emulator/commands/mod.rs",
+      "bytes": 43,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/emulator/commands/raw.rs",
+      "bytes": 376,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/emulator/commands/rotate.rs",
+      "bytes": 344,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/emulator/commands/sms.rs",
+      "bytes": 463,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/emulator/mod.rs",
+      "bytes": 167,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/emulator/models/adb_emulator_command.rs",
+      "bytes": 873,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/emulator/models/mod.rs",
+      "bytes": 78,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/emulator/tcp_emulator_transport.rs",
+      "bytes": 3836,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/error.rs",
+      "bytes": 6473,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/lib.rs",
+      "bytes": 1194,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/mdns/mdns_device.rs",
+      "bytes": 2514,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/mdns/mdns_discovery.rs",
+      "bytes": 2337,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/mdns/mod.rs",
+      "bytes": 122,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/adb_message_device.rs",
+      "bytes": 7752,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/adb_message_device_commands.rs",
+      "bytes": 2595,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/adb_message_transport.rs",
+      "bytes": 1746,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/adb_session.rs",
+      "bytes": 7556,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/adb_transport_message.rs",
+      "bytes": 4795,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/framebuffer.rs",
+      "bytes": 3560,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/install.rs",
+      "bytes": 1668,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/list.rs",
+      "bytes": 7497,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/mod.rs",
+      "bytes": 202,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/pull.rs",
+      "bytes": 1853,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/push.rs",
+      "bytes": 1159,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/reboot.rs",
+      "bytes": 593,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/remount.rs",
+      "bytes": 1081,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/root.rs",
+      "bytes": 539,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/shell.rs",
+      "bytes": 3892,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/stat.rs",
+      "bytes": 559,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/uninstall.rs",
+      "bytes": 981,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/utils/message_writer.rs",
+      "bytes": 1253,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/utils/mod.rs",
+      "bytes": 139,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/utils/shell_message_writer.rs",
+      "bytes": 1213,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/commands/verity.rs",
+      "bytes": 832,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/message_commands.rs",
+      "bytes": 2994,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/mod.rs",
+      "bytes": 415,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/models/adb_rsa_key.rs",
+      "bytes": 8668,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/models/mod.rs",
+      "bytes": 97,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/tcp/README.md",
+      "bytes": 341,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/tcp/adb_tcp_device.rs",
+      "bytes": 3501,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/tcp/mod.rs",
+      "bytes": 123,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/tcp/tcp_transport.rs",
+      "bytes": 11732,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/usb/README.md",
+      "bytes": 752,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/usb/adb_usb_device.rs",
+      "bytes": 5856,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/usb/mod.rs",
+      "bytes": 197,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/usb/usb_transport.rs",
+      "bytes": 11345,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/usb/utils.rs",
+      "bytes": 4057,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/message_devices/utils.rs",
+      "bytes": 1908,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/adb_command.rs",
+      "bytes": 1244,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/adb_host_command.rs",
+      "bytes": 2153,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/adb_local_command.rs",
+      "bytes": 4807,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/adb_request_status.rs",
+      "bytes": 516,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/adb_stat_extended_response.rs",
+      "bytes": 9805,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/adb_stat_response.rs",
+      "bytes": 1781,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/framebuffer_info.rs",
+      "bytes": 3106,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/host_features.rs",
+      "bytes": 753,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/list_info.rs",
+      "bytes": 2876,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/mod.rs",
+      "bytes": 891,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/reboot_type.rs",
+      "bytes": 951,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/remount_info.rs",
+      "bytes": 1491,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/models/sync_command.rs",
+      "bytes": 559,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/README.md",
+      "bytes": 359,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/adb_server.rs",
+      "bytes": 3701,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/commands/connect.rs",
+      "bytes": 741,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/commands/devices.rs",
+      "bytes": 5261,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/commands/disconnect.rs",
+      "bytes": 676,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/commands/kill.rs",
+      "bytes": 352,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/commands/mdns.rs",
+      "bytes": 1988,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/commands/mod.rs",
+      "bytes": 150,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/commands/pair.rs",
+      "bytes": 696,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/commands/reconnect.rs",
+      "bytes": 357,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/commands/server_status.rs",
+      "bytes": 430,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/commands/version.rs",
+      "bytes": 422,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/commands/wait_for_device.rs",
+      "bytes": 722,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/mod.rs",
+      "bytes": 218,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/models/adb_version.rs",
+      "bytes": 1065,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/models/device_long.rs",
+      "bytes": 7884,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/models/device_short.rs",
+      "bytes": 1566,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/models/device_state.rs",
+      "bytes": 3186,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/models/mdns_services.rs",
+      "bytes": 1874,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/models/mod.rs",
+      "bytes": 441,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/models/server_status.rs",
+      "bytes": 5183,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/models/wait_for_device.rs",
+      "bytes": 1662,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server/tcp_server_transport.rs",
+      "bytes": 5967,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/README.md",
+      "bytes": 694,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/adb_server_device.rs",
+      "bytes": 3536,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/adb_server_device_commands.rs",
+      "bytes": 10878,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/forward.rs",
+      "bytes": 1194,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/framebuffer.rs",
+      "bytes": 2693,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/host_features.rs",
+      "bytes": 603,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/install.rs",
+      "bytes": 1414,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/list.rs",
+      "bytes": 3133,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/logcat.rs",
+      "bytes": 1533,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/mod.rs",
+      "bytes": 293,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/reboot.rs",
+      "bytes": 496,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/reconnect.rs",
+      "bytes": 400,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/recv.rs",
+      "bytes": 4013,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/remount.rs",
+      "bytes": 684,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/reverse.rs",
+      "bytes": 1178,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/root.rs",
+      "bytes": 414,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/send.rs",
+      "bytes": 4151,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/stat.rs",
+      "bytes": 1789,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/tcpip.rs",
+      "bytes": 422,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/transport.rs",
+      "bytes": 530,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/uninstall.rs",
+      "bytes": 1001,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/usb.rs",
+      "bytes": 396,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/commands/verity.rs",
+      "bytes": 634,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/server_device/mod.rs",
+      "bytes": 160,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    },
+    {
+      "source": "vendor/adb_client/src/utils.rs",
+      "bytes": 1082,
+      "category": "GBST_BUILD_DOCS",
+      "status": "NOT_PORTED",
+      "mapping": "Build, assets or docs reviewed separately; only valid LPMBox-specific equivalents retained"
+    }
+  ],
+  "full_gui_revision": "GBST 2.0.0 visual shell materially ported into LPMBox; device-specific Google workflow excluded",
+  "additional_source_files": [
+    "crates/lpmbox-gui/src/gbst_shell.rs",
+    "crates/lpmbox-gui/assets/models/gbst_Etc.png",
+    "crates/lpmbox-gui/assets/models/gbst_Lenovo.png",
+    "crates/lpmbox-gui/assets/icons/about_issue.svg",
+    "crates/lpmbox-gui/assets/icons/about_ltbox.svg",
+    "crates/lpmbox-gui/assets/icons/about_lpmbox_repo.svg"
+  ],
+  "verified_language_catalogs": 12,
+  "verified_keys_per_language": 393,
+  "mtk_flash_backend_original_git_diff_empty": true
+}

@@ -1,14 +1,26 @@
 # LPMBOX
 
-![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)
+## v3.1.3 (2026-11-09)
 
-> This project follows the **LTBox documentation style** and is released under the **LTBox license model**.
+- Fixed Windows startup console flash from registry-based theme lookup.
+- Stabilized the About-screen brand icon during responsive-sidebar animation.
+- Removed the separate Proinfo backup item from the sidebar without deleting the related device or country-code work functions.
+- Accepted either the exact firmware image directory or its immediate parent; blocked invalid directory selections before the firmware worker starts.
+- Made previously white ROM/driver/modal sections theme-aware under Dark mode.
+- Added 12 fixed-text locale JSON catalogs covering 1,512 extracted Korean source strings, while preserving existing dynamic log fallbacks.
+- Preserved ROM flash/recovery operations and workflows. No firmware flashing was performed in testing.
+- Verified Rust workspace unit tests and a Windows x86-64 Release build.
+
+
+![License: GNU GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
+
+> The original LPMBox project code is licensed under **GNU GPL v3 (GPL-3.0-only)**, like GBST v2.0.0. Third-party code and assets retain their own rights. See THIRD_PARTY_LICENSES.
 >
 > * [LTBox](https://github.com/jjhitel/LTBox), [LTBox License](https://github.com/jjhitel/LTBox?tab=License-1-ov-file)
 > * Inspired by LTBox and adapted for **MediaTek-based Lenovo tablet firmware workflows**.
 > * **This project is not affiliated with or endorsed by the LTBox developer. I only received permission to develop LPMBox.**
-> * Based on LTBox (CC BY-NC-SA 4.0); modified and extended by **돠스 (dwas)** for MTK Lenovo firmware workflows.
-> * **NonCommercial:** Do not sell this project, offer paid access, or use it primarily for commercial advantage or monetary compensation.
+> * Developed with reference to LTBox (original CC BY-NC-SA 4.0 license); modified and extended by **돠스 (dwas)** for MTK Lenovo firmware workflows.
+> * **GPLv3:** Commercial use and redistribution are permitted subject to the GPLv3 terms, including corresponding-source obligations. Third-party rights still apply.
 
 ---
 
@@ -107,14 +119,14 @@ Typical contents include:
 > Make sure you use **official firmware downloaded via Lenovo Software Fix**.
 
 ### 4.4 Run
-Run `start.cmd` and select an option.
+Run lpmbox.exe and select the ROM task or device-management option in the graphical interface.
 
 ---
 
 ## 5. Requirements
 
 ### Recommended environment
-* Windows 10/11 (32-bit, 64-bit)
+* Windows 10/11 (64-bit x86-64)
 * A stable USB cable/port (direct motherboard USB ports are recommended)
 * **USB debugging (ADB) enabled and PC authorized**
 * **MediaTek USB Port (Preloader) drivers installed**  
@@ -130,7 +142,7 @@ An official firmware/tool package for your device that includes:
 ---
 
 ## 6. ⚠️ Important: Disclaimer
-This project is provided for **learning, research, and personal use only**.  
+This software is primarily intended for learning and research. The GPLv3 license grants software redistribution and commercial-use rights for code covered by that license; third-party components may have separate terms.
 Firmware flashing and partition-level operations involve **serious risks**, including:
 * Device **bricking** / boot failure
 * **Data loss** (factory reset)
@@ -165,19 +177,44 @@ The author is not responsible for any damage or loss caused by using this tool.
 ---
 
 ## 9. License
-LPMBox follows the same license model as **LTBox**.
 
-This work is licensed under the  
-**Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)**.
+**LPMBox original source code: GNU General Public License version 3 (GPL-3.0-only).**
 
-For full details, see the `LICENSE` file or visit:  
-[https://creativecommons.org/licenses/by-nc-sa/4.0/](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+The full GPLv3 license is included in the root **LICENSE** file. This matches
+GBST v2.0.0's declared source-code license.
 
-> ⚠️ **Note**  
-> Third-party tools or files used or downloaded by LPMBox (e.g., SP Flash Tool, platform-tools, firmware packages)  
-> are subject to **their own licenses and distribution terms**. Please review and comply with them separately.
+- Source code is available to study, modify, redistribute, and use commercially
+  under the GPLv3 requirements, including corresponding source availability.
+- LPMBox and GBST are developed by dwas. LTBox is independent and not affiliated.
+- Earlier LPMBox releases were published under CC BY-NC-SA 4.0. Their historical
+  license text remains in THIRD_PARTY_LICENSES/PRIOR_RELEASE_CC_BY_NC_SA_4.0.txt.
+- LTBox-derived code, icons, fonts, firmware, SP Flash Tool and other third-party
+  materials retain their original rights. Verify provenance and obtain any
+  necessary relicensing permission before distributing a GPLv3-only combination.
+  GPLv3 project metadata alone does not override existing third-party licenses.
 
-[![CC BY-NC-SA 4.0][cc-by-nc-sa-image]][cc-by-nc-sa]
+## 10. GBST v2.0.0-inspired architecture
 
-[cc-by-nc-sa]: https://creativecommons.org/licenses/by-nc-sa/4.0/
-[cc-by-nc-sa-image]: https://licensebuttons.net/l/by-nc-sa/4.0/88x31.png
+This LPMBox revision ports the GBST v2.0.0 actual graphical shell and shared foundations while
+**preserving LPMBox's ROM installation, readback, driver and recovery workers**.
+
+- GBST-like Iced appearance preferences: system/light/dark, indigo/teal/rose,
+  persistent at %LOCALAPPDATA%/dwas_kr/LPMBox/appearance.json.
+- GBST v2.0.0 Material 3 shell primitives, exact pill-style navigation items,
+  responsive sidebar, top page header, three dashboard cards, full-width footer,
+  Settings cards, About screen, SVG links, GPLv3 dialog and ROM task timeline.
+- Responsive 820x720 minimum main window, 1080px sidebar breakpoint,
+  dark icon recoloring and theme-dependent Material 3 colors.
+- File-backed 12-language locale catalogs (GBST-style UI, 228 legacy phrases,
+  and 1,512 extracted fixed Korean-source text keys for each language)
+  in crates/lpmbox-core/lang/. Dynamic device logs retain the legacy runtime
+  translation fallback so firmware operation flow remains unchanged.
+- Separate cautious, tested log and interrupted-download cleanup modules;
+  firmware ZIP files, embedded tools, ADB keys and device backups are untouched.
+- Exact GBST-style in-app GPLv3 scrollable license viewer and confirmation dialogs.
+- Dedicated core ROM-flashing and device APIs are unchanged and stay outside the GUI port.
+- This is a shared-architecture port, **not an import of GBST's Google APK installation
+  workflow**. The two tools have different device-operation responsibilities.
+
+See GBST_MIGRATION_AUDIT.md and GBST_SOURCE_INVENTORY_20261109.json for
+file-by-file implementation status, remaining port limits and screenshot tests.
