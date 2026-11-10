@@ -1,29 +1,3 @@
-# LPMBOX
-
-## v3.1.3 (2026-11-09)
-
-- Fixed Windows startup console flash from registry-based theme lookup.
-- Stabilized the About-screen brand icon during responsive-sidebar animation.
-- Removed the separate Proinfo backup item from the sidebar without deleting the related device or country-code work functions.
-- Accepted either the exact firmware image directory or its immediate parent; blocked invalid directory selections before the firmware worker starts.
-- Made previously white ROM/driver/modal sections theme-aware under Dark mode.
-- Added 12 fixed-text locale JSON catalogs covering 1,512 extracted Korean source strings, while preserving existing dynamic log fallbacks.
-- Preserved ROM flash/recovery operations and workflows. No firmware flashing was performed in testing.
-- Verified Rust workspace unit tests and a Windows x86-64 Release build.
-
-
-![License: GNU GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
-
-> The original LPMBox project code is licensed under **GNU GPL v3 (GPL-3.0-only)**, like GBST v2.0.0. Third-party code and assets retain their own rights. See THIRD_PARTY_LICENSES.
->
-> * [LTBox](https://github.com/jjhitel/LTBox), [LTBox License](https://github.com/jjhitel/LTBox?tab=License-1-ov-file)
-> * Inspired by LTBox and adapted for **MediaTek-based Lenovo tablet firmware workflows**.
-> * **This project is not affiliated with or endorsed by the LTBox developer. I only received permission to develop LPMBox.**
-> * Developed with reference to LTBox (original CC BY-NC-SA 4.0 license); modified and extended by **돠스 (dwas)** for MTK Lenovo firmware workflows.
-> * **GPLv3:** Commercial use and redistribution are permitted subject to the GPLv3 terms, including corresponding-source obligations. Third-party rights still apply.
-
----
-
 ## 1. Developer YouTube
 * Maintained by: **돠스 (dwas)**
 * [Youtube Channel](https://www.youtube.com/@dwas_KR?sub_confirmation=1)
