@@ -12,3 +12,5 @@ nusb.workspace = true
 pollster.workspace = true
 ureq.workspace = true
 zip.workspace = true
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Devices_DeviceAndDriverInstallation", "Win32_System_Registry", "Win32_Foundation"] }

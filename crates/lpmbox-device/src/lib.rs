@@ -11,6 +11,15 @@ use std::process::{Command, Output};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
+use std::sync::mpsc;
+
+#[cfg(windows)]
+mod preloader_windows;
+
+mod slot_a_workflow;
+pub use slot_a_workflow::{SlotAStageRoute, run_current_slot_a_stage_v2};
+mod partition_edl;
+pub use partition_edl::{verify_partition_mtk_device, request_partition_preloader_edl, prepare_partition_preloader_serial, request_partition_preloader_edl_for_serial, recover_partition_after_failure};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -26,11 +35,15 @@ const PRELOADER_TOKENS: &[&str] = &[
     "MediaTek PreLoader USB VCOM",
     "MediaTek PreLoader USB",
     "MediaTek PreLoader",
-    "MediaTek",
     "PreLoader",
+    "MediaTek",
+    "MediaTek USB",
+    "PreLoader USB",
 ];
 
-const PRELOADER_POLL_INTERVAL_MS: u64 = 500;
+// The PreLoader VCOM window can be as short as ~2 seconds. Poll present
+// Windows Ports with native SetupAPI, not slow pnputil/wmic subprocesses.
+const PRELOADER_POLL_INTERVAL_MS: u64 = 75;
 
 const ADB_SERVER_ADDR: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 5037);
 const ADB_SERVER_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
@@ -119,11 +132,58 @@ pub fn terminate_adb_fastboot_processes() {
     }
 }
 
-pub fn probe_adb_device_for_convert_wipe<F>(mut on_log: F) -> Result<AdbDeviceProbe>
-    where
-        F: FnMut(String),
-    {
-        prepare_adb_usb_environment();
+// Original probe keeps the Android 15+ policy for ROW updates,
+// country reset and all other existing caller paths.
+pub fn probe_adb_device_for_convert_wipe<F>(on_log: F) -> Result<AdbDeviceProbe>
+where F: FnMut(String) {
+    probe_adb_device_for_convert_wipe_inner(false, on_log)
+}
+
+// For ROM options 1 and 2: Android 14 is allowed through the ADB probe
+// only. The following firmware/model/region validation still must approve
+// the combination before backup, reboot, Fastboot or any SPFT write begins.
+pub fn probe_adb_device_for_android14_supported_rom<F>(on_log: F) -> Result<AdbDeviceProbe>
+where F: FnMut(String) {
+    probe_adb_device_for_convert_wipe_inner(true, on_log)
+}
+// Keep the previous entry point for code compatibility.
+pub fn probe_adb_device_for_android14_convert_trial<F>(on_log: F) -> Result<AdbDeviceProbe>
+where F: FnMut(String) {
+    probe_adb_device_for_android14_supported_rom(on_log)
+}
+
+fn android_major_permitted_for_probe(major: u32, allow_android14_convert_trial: bool) -> bool {
+    major > 14 || (allow_android14_convert_trial && major == 14)
+}
+
+#[cfg(test)]
+mod android14_convert_probe_policy_tests {
+    use super::*;
+
+    #[test]
+    fn original_adb_probe_rejects_android_14_and_older() {
+        for major in [9, 12, 13, 14] {
+            assert!(!android_major_permitted_for_probe(major, false));
+        }
+        for major in [15, 16, 17] {
+            assert!(android_major_permitted_for_probe(major, false));
+        }
+    }
+
+    #[test]
+    fn experimental_probe_allows_only_android_14_extra() {
+        assert!(!android_major_permitted_for_probe(13, true));
+        assert!(android_major_permitted_for_probe(14, true));
+        assert!(android_major_permitted_for_probe(15, true));
+    }
+}
+
+fn probe_adb_device_for_convert_wipe_inner<F>(
+    allow_android14_convert_trial: bool,
+    mut on_log: F,
+) -> Result<AdbDeviceProbe>
+where F: FnMut(String) {
+    prepare_adb_usb_environment();
 
     on_log(spinner_log(
         "adb_detect_start",
@@ -148,10 +208,16 @@ pub fn probe_adb_device_for_convert_wipe<F>(mut on_log: F) -> Result<AdbDevicePr
     if let Some(major) = android_major {
         on_log(format!("[ADB] Android 버전: {major}"));
 
-        if major <= 14 {
+        if !android_major_permitted_for_probe(major, allow_android14_convert_trial) {
             return Err(LpmError::Adb(format!(
-                "Android {major} 기기는 1번 설치 흐름에서 차단됩니다. Android 15 이상에서만 진행합니다."
+                "Android {major} 기기는 이 작업의 지원 범위가 아닙니다. Android 14 이상 ROM 작업은 모델·플랫폼·지역 검사 후 허용됩니다."
             )));
+        }
+        if major == 14 && allow_android14_convert_trial {
+            on_log(
+                "[ADB] Android 14 기기 확인: 지원되는 MT6897/MT6835 모델·플랫폼·ROM 지역 조합인지 이후 단계에서 검증합니다."
+                .to_string()
+            );
         }
     } else {
         on_log("[ADB] Android 버전 감지 실패".to_string());
@@ -234,35 +300,63 @@ where
         "[ADB] ADB 명령어로 Slot 설정 중... │",
     ));
 
-    let mut bootctl_ok = false;
+    // ro.boot.slot_suffix describes the running slot, not writable boot metadata.
+    let running_slot = adb_get_slot_suffix_checked()?;
+    on_log(format!(
+        "[ADB] ro.boot.slot_suffix (현재 실행 슬롯): {}",
+        running_slot.as_deref().unwrap_or("UNKNOWN")
+    ));
 
-    for attempt in 1..=10 {
-        match adb_shell_checked("bootctl set-active-boot-slot 0") {
-            Ok(_) => {
-                bootctl_ok = true;
-                break;
-            }
-            Err(err) => {
-                if attempt == 1 || attempt == 10 {
-                    on_log(format!("[ADB] Slot 설정 재시도 {attempt}/10 실패: {err}"));
-                }
-
-                if attempt < 10 {
-                    thread::sleep(Duration::from_secs(2));
-                }
-            }
-        }
-    }
+    // Boot Control HAL changes the NEXT boot slot, if the vendor permits an
+    // ordinary USB-debugging shell. Do not attempt root or metadata edits.
+    let next_boot_slot = adb_shell_checked("bootctl get-active-boot-slot")
+        .ok()
+        .and_then(|raw| parse_bootctl_slot(&raw));
+    let mut bootctl_ok = next_boot_slot == Some(0);
 
     if bootctl_ok {
-        on_log(spinner_log(
-            "adb_slot_set",
-            "[ADB] ADB 명령어로 Slot 설정 완료",
-        ));
+        on_log("[ADB] Boot Control HAL 다음 부팅 슬롯 A 확인. 중복 변경 생략".into());
+    } else {
+        let is_ab = adb_shell_checked("bootctl get-number-slots")
+            .ok()
+            .is_some_and(|raw| raw.trim() == "2");
+        let a_bootable = adb_shell_checked("bootctl is-slot-bootable 0")
+            .ok()
+            .is_some_and(|raw| raw.trim() == "1");
+
+        if is_ab && a_bootable {
+            for attempt in 1..=2 {
+                let write_result = adb_shell_checked("bootctl set-active-boot-slot 0");
+                // Do not trust shell completion; validate against Boot Control HAL.
+                let verified = adb_shell_checked("bootctl get-active-boot-slot")
+                    .ok()
+                    .and_then(|raw| parse_bootctl_slot(&raw));
+                if verified == Some(0) {
+                    bootctl_ok = true;
+                    on_log(format!("[ADB] Boot Control HAL 슬롯 A 설정 및 재조회 성공 ({attempt}/2)"));
+                    break;
+                }
+                match write_result {
+                    Ok(output) => on_log(format!(
+                        "[ADB] 슬롯 A 설정 결과를 검증할 수 없습니다 ({attempt}/2): {}",
+                        if output.trim().is_empty() { "반환값 없음" } else { output.trim() }
+                    )),
+                    Err(err) => on_log(format!("[ADB] 슬롯 A 설정 실패 ({attempt}/2): {err}")),
+                }
+                if attempt < 2 {
+                    thread::sleep(Duration::from_secs(1));
+                }
+            }
+        } else {
+            on_log("[ADB] A/B 슬롯 수 또는 슬롯 A 부팅 가능 여부를 HAL로 확인할 수 없어 ADB 슬롯 변경을 생략합니다.".into());
+        }
+    }
+    if bootctl_ok {
+        on_log(spinner_log("adb_slot_set", "[ADB] Boot Control HAL 슬롯 A 확인 완료"));
     } else {
         on_log(spinner_log(
             "adb_slot_set",
-            "[ADB] ADB 명령어 Slot 설정 실패, Fastboot Slot 설정으로 계속 진행합니다.",
+            "[ADB] HAL 슬롯 A 설정 미검증(ADB 권한 제한 가능). 기존 Fastboot 검증으로 진행합니다.",
         ));
     }
 
@@ -289,7 +383,9 @@ where
         on_log("[Fastboot] current-slot 감지 실패, A로 설정합니다.".to_string());
     }
 
-    run_fastboot_set_active_a_sequence(&mut on_log)?;
+    // One deferred retry is allowed after re-entering the bootloader,
+    // but the final active-slot guard below still blocks unsafe flashing.
+    run_fastboot_set_active_a_sequence(&mut on_log, true)?;
 
     on_log(spinner_log(
         "fastboot_reboot_bootloader",
@@ -307,16 +403,17 @@ where
         "[Fastboot] bootloader 재진입 후 Fastboot 재감지 완료",
     ));
 
-    run_fastboot_set_active_a_sequence(&mut on_log)?;
+    run_fastboot_set_active_a_sequence(&mut on_log, false)?;
 
     let final_slot = fastboot_get_current_slot()?.unwrap_or_else(|| "UNKNOWN".to_string());
 
     on_log(format!("[Fastboot] current-slot 재확인: {final_slot}"));
 
     if final_slot != "_a" {
+        // Never proceed to the SP Flash Tool with the wrong active slot.
         let _ = fastboot_reboot();
         return Err(LpmError::Fastboot(format!(
-            "slot A 설정 실패 / 최종 slot: {final_slot}"
+            "slot A 변경 검증 실패 / 최종 current-slot={final_slot}. A/B 지원, 부트로더 잠금 또는 OEM 정책을 확인해주세요. 안전을 위해 ROM 설치를 중단했습니다."
         )));
     }
 
@@ -355,6 +452,14 @@ where
             "[ADB] adb reboot 1회 실행 실패, Fastboot 명령을 계속 시도합니다."
         },
     ));
+
+    // A successful Android reboot already issued the reboot request.
+    // Fastboot is not active in that case. Calling fastboot reboot only
+    // delays a short-lived PreLoader USB window and is an invalid fallback.
+    if adb_reboot_ok {
+        on_log("[Fastboot] ADB 재부팅 명령 성공: 불필요한 fastboot reboot 생략".to_string());
+        return;
+    }
 
     on_log(spinner_log(
         "reboot_device",
@@ -619,6 +724,25 @@ fn adb_shell_checked(command: &str) -> Result<String> {
         )),
         AdbUsbState::Error(err) => Err(LpmError::Adb(err)),
     }
+}
+
+fn parse_bootctl_slot(value: &str) -> Option<u8> {
+    match value.trim() {
+        "0" => Some(0),
+        "1" => Some(1),
+        _ => None,
+    }
+}
+
+pub fn read_running_slot_for_lk_backup<F>(mut on_log: F) -> Result<String>
+where F: FnMut(String) {
+    wait_for_adb_device_ready_until(&mut on_log, Duration::from_secs(120))?;
+    let slot = adb_get_slot_suffix_checked()?
+        .ok_or_else(|| LpmError::Adb(
+            "ro.boot.slot_suffix가 _a/_b로 확인되지 않아 LK 리드백을 중단합니다.".into()
+        ))?;
+    on_log(format!("[LK] Android ro.boot.slot_suffix={slot}, 대상 파티션=lk{slot}"));
+    Ok(format!("lk{slot}"))
 }
 
 fn adb_get_slot_suffix_checked() -> Result<Option<String>> {
@@ -1016,25 +1140,14 @@ impl NativeFastbootDevice {
 
     fn get_slot_suffix(&mut self) -> Result<Option<String>> {
         match self.getvar("current-slot") {
-            Ok(slot) => match slot.trim() {
-                "a" | "_a" => Ok(Some("_a".to_string())),
-                "b" | "_b" => Ok(Some("_b".to_string())),
-                _ => Ok(None),
-            },
+            Ok(slot) => Ok(normalize_fastboot_slot(&slot).map(str::to_string)),
             Err(_) => Ok(None),
         }
     }
 
     fn set_active_a(&mut self) -> Result<()> {
-    self.command("set_active:a").map(|_| ())
-    }
-
-    fn set_active_a_compat(&mut self) -> Result<()> {
-    self.command("set_active:a").map(|_| ())
-    }
-
-    fn set_active_a_legacy(&mut self) -> Result<()> {
-    self.command("set_active:a").map(|_| ())
+        // Equivalent to fastboot set_active a and --set-active=a.
+        self.command("set_active:a").map(|_| ())
     }
 
     fn reboot(&mut self) -> Result<()> {
@@ -1099,29 +1212,91 @@ fn fastboot_reboot_bootloader() -> Result<()> {
     device.reboot_bootloader()
 }
 
-fn run_fastboot_set_active_a_sequence<F>(on_log: &mut F) -> Result<()>
+fn normalize_fastboot_slot(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "a" | "_a" => Some("_a"),
+        "b" | "_b" => Some("_b"),
+        _ => None,
+    }
+}
+
+fn slot_support_diagnostic(slot_count: &str, has_slot_boot: &str) -> Result<()> {
+    if slot_count.trim() == "1" || has_slot_boot.trim().eq_ignore_ascii_case("no") {
+        return Err(LpmError::Fastboot(format!(
+            "A/B 슬롯 미지원 또는 정보 불일치: slot-count={}, has-slot:boot={}. 슬롯 A 변경을 강제하지 않고 ROM 설치를 중단합니다.",
+            slot_count.trim(), has_slot_boot.trim()
+        )));
+    }
+    Ok(())
+}
+
+fn run_fastboot_set_active_a_sequence<F>(
+    on_log: &mut F,
+    allow_retry_after_reboot: bool,
+) -> Result<()>
 where
     F: FnMut(String),
 {
-    on_log(spinner_log(
-        "fastboot_slot_a",
-        "[Fastboot] slot A 설정 중... │",
+    // An A/B slot must be verified. Three identical set_active:a calls
+    // are not separate compatibility modes and could hide a real refusal.
+    let mut device = NativeFastbootDevice::open()?;
+    let slot_count = device.getvar("slot-count")
+        .unwrap_or_else(|_| "unknown".to_string());
+    let has_slot_boot = device.getvar("has-slot:boot")
+        .unwrap_or_else(|_| "unknown".to_string());
+    on_log(format!(
+        "[Fastboot] A/B 정보: slot-count={}, has-slot:boot={}",
+        slot_count.trim(), has_slot_boot.trim()
     ));
+    slot_support_diagnostic(&slot_count, &has_slot_boot)?;
 
-    NativeFastbootDevice::open().and_then(|mut device| device.set_active_a())?;
-    thread::sleep(Duration::from_secs(1));
+    let before = device.get_slot_suffix()?.ok_or_else(|| {
+        LpmError::Fastboot(format!(
+            "current-slot 조회 불가: slot-count={}, has-slot:boot={}. 슬롯 확인 없이 변경하지 않습니다.",
+            slot_count.trim(), has_slot_boot.trim()
+        ))
+    })?;
+    on_log(format!("[Fastboot] 설정 전 current-slot: {before}"));
+    if before == "_a" {
+        on_log(spinner_log("fastboot_slot_a",
+            "[Fastboot] 이미 슬롯 A입니다. 중복 변경을 생략합니다."));
+        return Ok(());
+    }
 
-    NativeFastbootDevice::open().and_then(|mut device| device.set_active_a_compat())?;
-    thread::sleep(Duration::from_secs(1));
-
-    NativeFastbootDevice::open().and_then(|mut device| device.set_active_a_legacy())?;
-    thread::sleep(Duration::from_secs(1));
-
-    on_log(spinner_log(
-        "fastboot_slot_a",
-        "[Fastboot] slot A 설정 완료",
-    ));
-
+    on_log(spinner_log("fastboot_slot_a",
+        "[Fastboot] slot A 변경 요청 중... │"));
+    if let Err(err) = device.set_active_a() {
+        // Some devices complete the slot change but still return a transport
+        // error. Read the actual bootloader state before declaring failure.
+        drop(device);
+        let verified = fastboot_get_current_slot().ok().flatten();
+        if verified.as_deref() == Some("_a") {
+            on_log("[Fastboot] 명령 응답은 오류였으나 current-slot=A가 확인되어 진행합니다.".to_string());
+            return Ok(());
+        }
+        on_log(format!(
+            "[Fastboot] 슬롯 A 전환 요청 실패: {err} / 확인된 슬롯: {}",
+            verified.as_deref().unwrap_or("UNKNOWN")
+        ));
+        if allow_retry_after_reboot {
+            on_log("[Fastboot] 재부팅 후 두 번째 슬롯 전환을 시도합니다. A 확인 전에는 플래싱을 시작하지 않습니다.".to_string());
+            return Ok(());
+        }
+        on_log("[Fastboot] 두 번째 전환 응답도 실패했습니다. 명령 오류만으로 결과를 판정하지 않고, 다음 단계에서 current-slot을 최종 확인합니다.".to_string());
+        return Ok(());
+    }
+    thread::sleep(Duration::from_millis(350));
+    drop(device);
+    let after = fastboot_get_current_slot()?
+        .unwrap_or_else(|| "UNKNOWN".to_string());
+    if after == "_a" {
+        on_log(spinner_log("fastboot_slot_a",
+            "[Fastboot] slot A 변경 및 current-slot 검증 완료"));
+    } else {
+        on_log(format!(
+            "[Fastboot] 명령 수락 후 current-slot={after}. bootloader 재진입 후 다시 검증하며, 최종 슬롯이 A가 아니면 ROM 설치를 중단합니다."
+        ));
+    }
     Ok(())
 }
 
@@ -1497,54 +1672,81 @@ fn extract_zui_version_segment(value: &str) -> Option<String> {
 
 
 
-pub fn detect_preloader_once() -> PreloaderDetectResult {
-    let checked_tokens = preloader_tokens();
+// Start the PreLoader watcher *before* issuing adb reboot. A pending
+// reboot command can take several seconds to return; a concurrent native
+// Windows COM-port watcher must observe the ephemeral port during that call.
+pub struct PreloaderWatch {
+    monitor: thread::JoinHandle<PreloaderDetectResult>,
+    armed: bool,
+}
 
-    if !cfg!(windows) {
-        return PreloaderDetectResult {
-            detected: false,
-            display_name: None,
-            method: Some("Windows 전용 감지".to_string()),
-            checked_tokens,
-        };
+impl PreloaderWatch {
+    pub fn start(timeout_secs: u64) -> Self {
+        let (ready_tx, ready_rx) = mpsc::sync_channel::<()>(1);
+        let monitor = thread::spawn(move || {
+            // Probe a real Windows COM port before acknowledging readiness.
+            // Measurement covers the concurrent ADB reboot interval too.
+            let started = Instant::now();
+            let baseline = detect_preloader_once();
+            let _ = ready_tx.send(());
+            let mut found = if baseline.detected { baseline }
+                else { detect_preloader_until_timeout(timeout_secs) };
+            if found.detected {
+                let elapsed = started.elapsed().as_millis();
+                let mode = found.method.take().unwrap_or_default();
+                found.method = Some(format!("{mode}; 감시 시작 후 {elapsed}ms에 PreLoader 인식"));
+            }
+            found
+        });
+        // Never silently reboot when the monitoring thread failed to initialize.
+        let armed = ready_rx.recv_timeout(Duration::from_millis(1600)).is_ok();
+        Self { monitor, armed }
     }
 
-    let methods: &[(&str, &str, &[&str])] = &[
-        (
-            "pnputil /enum-devices /connected",
-            "pnputil",
-            &["/enum-devices", "/connected"],
-        ),
-        (
-            "wmic Win32_PnPEntity ConfigManagerErrorCode=0",
-            "wmic",
-            &[
-                "path",
-                "Win32_PnPEntity",
-                "where",
-                "ConfigManagerErrorCode=0",
-                "get",
-                "Name",
-                "/value",
-            ],
-        ),
-    ];
+    pub fn is_armed(&self) -> bool {
+        self.armed
+    }
 
-    for (_method_name, program, args) in methods {
-        if let Some(display_name) = run_and_find_preloader(program, args) {
+    pub fn wait(self) -> PreloaderDetectResult {
+        self.monitor.join().unwrap_or_else(|_| PreloaderDetectResult {
+            detected: false,
+            display_name: None,
+            method: Some("PreLoader 감시 작업이 예기치 않게 종료되었습니다".to_string()),
+            checked_tokens: preloader_tokens(),
+        })
+    }
+}
+
+pub fn detect_preloader_once() -> PreloaderDetectResult {
+    let checked_tokens = preloader_tokens();
+    #[cfg(windows)]
+    {
+        let present = preloader_windows::scan_present_mtk_ports();
+        if let Some(display_name) = present.preloader {
             return PreloaderDetectResult {
                 detected: true,
                 display_name: Some(display_name),
-                method: None,
+                method: Some("Windows SetupAPI / Ports / USB VID_0E8D PID_2000 / COM".to_string()),
+                checked_tokens,
+            };
+        }
+        if let Some(brom_name) = present.brom {
+            return PreloaderDetectResult {
+                detected: false,
+                display_name: None,
+                method: Some(format!(
+                    "MediaTek BROM(USB PID_0003) 감지: {brom_name}; SPFT V6 PreLoader(PID_2000) 아님"
+                )),
                 checked_tokens,
             };
         }
     }
-
     PreloaderDetectResult {
         detected: false,
         display_name: None,
-        method: None,
+        method: if cfg!(windows) { None } else {
+            Some("Windows 전용 감지".to_string())
+        },
         checked_tokens,
     }
 }
@@ -1555,6 +1757,7 @@ pub fn detect_preloader_until_timeout(timeout_secs: u64) -> PreloaderDetectResul
     }
 
     let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    let mut last_observed_mode = None;
 
     loop {
         let result = detect_preloader_once();
@@ -1562,12 +1765,19 @@ pub fn detect_preloader_until_timeout(timeout_secs: u64) -> PreloaderDetectResul
         if result.detected {
             return result;
         }
+        if result.method.is_some() {
+            last_observed_mode = result.method.clone();
+        }
 
         if Instant::now() >= deadline {
+            let reason = last_observed_mode.unwrap_or_else(||
+                "현재 연결된 PreLoader COM 포트가 없습니다. 과거에 등록된 COM 포트는 감지 대상으로 인정하지 않습니다."
+                    .to_string()
+            );
             return PreloaderDetectResult {
                 detected: false,
                 display_name: None,
-                method: Some(format!("{timeout_secs}초 제한 시간 초과")),
+                method: Some(format!("{timeout_secs}초 감시 종료: {reason}")),
                 checked_tokens: preloader_tokens(),
             };
         }
@@ -1581,50 +1791,6 @@ fn preloader_tokens() -> Vec<String> {
         .iter()
         .map(|token| (*token).to_string())
         .collect()
-}
-
-fn run_and_find_preloader(program: &str, args: &[&str]) -> Option<String> {
-    let output = hidden_command_output(program, args)?;
-
-    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
-
-    find_matching_line(&text)
-}
-
-fn find_matching_line(text: &str) -> Option<String> {
-    for line in text.lines() {
-        let line = line.trim();
-
-        if line.is_empty() {
-            continue;
-        }
-
-        if contains_preloader_token(line) {
-            return Some(clean_device_line(line));
-        }
-    }
-
-    None
-}
-
-fn contains_preloader_token(line: &str) -> bool {
-    let upper_line = line.to_uppercase();
-
-    PRELOADER_TOKENS.iter().any(|token| {
-        let upper_token = token.to_uppercase();
-        upper_line.contains(&upper_token)
-    })
-}
-
-fn clean_device_line(line: &str) -> String {
-    let trimmed = line.trim();
-
-    if let Some(value) = trimmed.strip_prefix("Name=") {
-        return value.trim().to_string();
-    }
-
-    trimmed.to_string()
 }
 
 const MTK_DRIVER_URL: &str = "https://mtkdriver.com/wp-content/uploads/MTK-Driver-v5.1632.zip";
@@ -1922,7 +2088,7 @@ fn check_mtk_driver_installed_impl() -> Result<bool> {
 fn check_mtk_driver_installed_impl() -> Result<bool> {
     let key = powershell_single_quote_escape(MTK_DRIVER_REGISTRY_KEY);
     let script = format!(
-        "$ErrorActionPreference = 'SilentlyContinue'; if (Test-Path '{key}') {{ Write-Output 'LPMBOX_MTK_DRIVER_FOUND' }}"
+        "$ErrorActionPreference = 'SilentlyContinue'; $driver = Get-ItemProperty -LiteralPath '{key}'; if ($driver -and $driver.DisplayName -match '(?i)^MediaTek\\s+SP\\s+Driver\\b') {{ Write-Output 'LPMBOX_MTK_DRIVER_FOUND' }}"
     );
 
     let output = hidden_command_output(
@@ -2294,4 +2460,54 @@ fn handle_elevated_exit(code: i32) -> Result<()> {
 #[cfg(windows)]
 fn powershell_single_quote_escape(value: &str) -> String {
     value.replace('\'', "''")
+}
+
+#[cfg(test)]
+mod fastboot_slot_a_guard_tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_a_and_b_slot_suffixes() {
+        assert_eq!(normalize_fastboot_slot("a"), Some("_a"));
+        assert_eq!(normalize_fastboot_slot("_a"), Some("_a"));
+        assert_eq!(normalize_fastboot_slot("b"), Some("_b"));
+        assert_eq!(normalize_fastboot_slot("_b"), Some("_b"));
+    }
+
+    #[test]
+    fn rejects_unknown_slots() {
+        for invalid in ["", "unknown", "none", "ab", "c"] {
+            assert_eq!(normalize_fastboot_slot(invalid), None);
+        }
+    }
+
+    #[test]
+    fn rejects_single_slot_devices() {
+        assert!(slot_support_diagnostic("1", "unknown").is_err());
+        assert!(slot_support_diagnostic("unknown", "no").is_err());
+        assert!(slot_support_diagnostic("2", "yes").is_ok());
+        assert!(slot_support_diagnostic("unknown", "unknown").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod adb_bootctl_slot_tests {
+    use super::*;
+    #[test]
+    fn accepts_only_known_bootctl_slots() {
+        assert_eq!(parse_bootctl_slot("0"), Some(0));
+        assert_eq!(parse_bootctl_slot(" 1\n"), Some(1));
+        for invalid in ["", "unknown", "Permission denied", "2", "0 1"] {
+            assert_eq!(parse_bootctl_slot(invalid), None);
+        }
+    }
+    #[test]
+    fn running_slot_property_is_read_only_evidence_not_a_write() {
+        let source = include_str!("lib.rs");
+        assert!(source.contains("getprop ro.boot.slot_suffix"));
+        assert!(!source.contains(&["setprop", "ro.boot.slot_suffix"].join(" ")));
+        assert!(source.contains("bootctl set-active-boot-slot 0"));
+        assert!(source.contains("bootctl is-slot-bootable 0"));
+        assert!(source.contains("bootctl get-active-boot-slot"));
+    }
 }

@@ -16,6 +16,9 @@ pub enum LpmError {
     #[error("차단된 펌웨어 버전입니다: {0}")]
     BlockedFirmware(String),
 
+    #[error("실험용 LK의 Secure Boot 인증이 확인되지 않았습니다: {0}")]
+    ExperimentalLkUnverified(String),
+
     #[error("scatter 복호화에 실패했습니다: {0}")]
     ScatterDecryptFailed(String),
 

@@ -6,7 +6,7 @@ use std::fs;
 use std::io::{self, Cursor, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, atomic::{AtomicBool, Ordering}};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -16,15 +16,78 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-const SPFT_TOOL_ZIP: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/assets/SPFlashToolV6_tool.zip"
-));
+// The proprietary SP Flash Tool binary is not redistributed in source.
+// Preserve the download -> cached ZIP -> fallback stage, but keep its
+// absent embedded payload explicit so GitHub source builds without the ZIP.
+const SPFT_TOOL_ZIP: &[u8] = &[];
 
 const SPFT_TOOL_REVISION: &str = "spflashtoolv6_official_v6_2404_20260615_a";
 
 const SPFT_OFFICIAL_ZIP_URL: &str =
     "https://spflashtools.com/wp-content/uploads/SP_Flash_Tool_V6.2404_Win.zip";
+
+/// Resolve a writable ASCII-only directory for the third-party V6 CLI.
+///
+/// Prefer the nearest writable ASCII ancestor of the project folder (so this
+/// user's G: project is kept together). Fall back to local application data,
+/// then the Windows Public Documents folder, and finally the OS temp folder.
+/// A non-ASCII directory is never passed to the legacy Boost filesystem.
+fn ascii_readback_workspace() -> Result<PathBuf> {
+    let process_dir = format!("process_{}", std::process::id());
+    let project = app_paths::runtime_root();
+    let mut nearest_ascii = project.as_path();
+    while !nearest_ascii.as_os_str().is_empty() && !ascii_spft_path(nearest_ascii) {
+        nearest_ascii = nearest_ascii.parent().ok_or_else(|| {
+            LpmError::Spft("영문 SPFT 작업 경로의 상위 폴더를 찾을 수 없습니다".into())
+        })?;
+    }
+
+    let mut candidates = Vec::new();
+    if !nearest_ascii.as_os_str().is_empty() {
+        candidates.push(nearest_ascii.join("LPMBox_SPFT_Readback").join(&process_dir));
+    }
+    candidates.push(app_paths::lpmbox_data_root()
+        .join("spft_readback").join(&process_dir));
+    if let Some(public) = std::env::var_os("PUBLIC") {
+        candidates.push(PathBuf::from(public).join("Documents")
+            .join("LPMBox_SPFT_Readback").join(&process_dir));
+    }
+    candidates.push(std::env::temp_dir()
+        .join("LPMBox_SPFT_Readback").join(&process_dir));
+
+    for path in candidates {
+        if !ascii_spft_path(&path) {
+            continue;
+        }
+        if fs::create_dir_all(&path).is_err() {
+            continue;
+        }
+        let probe = path.join(".write_access_check");
+        if fs::write(&probe, b"ok").is_ok() {
+            let _ = fs::remove_file(&probe);
+            return Ok(path);
+        }
+    }
+    Err(LpmError::Spft(
+        "SPFlashToolV6가 사용할 쓰기 가능한 영문(ASCII) 경로를 확보하지 못했습니다. 설치 경로와 쓰기 권한을 확인해주세요."
+            .into()
+    ))
+}
+
+fn ascii_spft_path(path: &Path) -> bool {
+    path.to_string_lossy().is_ascii()
+}
+
+fn require_spft_ascii_path(path: &Path, label: &str) -> Result<()> {
+    if ascii_spft_path(path) {
+        Ok(())
+    } else {
+        Err(LpmError::Spft(format!(
+            "{label} 경로에 비영문 문자가 있습니다. SPFlashToolV6 v6.2404가 해당 경로를 처리하지 못할 수 있으니 영문 폴더에 배치해주세요: {}",
+            path.display()
+        )))
+    }
+}
 
 pub fn prepare_proinfo_readback(selected_path: &Path) -> Result<ProinfoReadbackPlan> {
     let (_firmware_root_dir, image_dir) = resolve_root_and_image_dir(selected_path)?;
@@ -45,19 +108,32 @@ pub fn prepare_proinfo_readback(selected_path: &Path) -> Result<ProinfoReadbackP
         ))
     })?;
 
+    // SPFlashToolV6 v6.2404 uses a legacy Boost filesystem path conversion.
+    // Passing a Korean working directory causes create_directories to fail
+    // before it starts waiting for PreLoader, even when XML is valid UTF-8.
+    // Preserve the original LPMBox backup location, but give the third-party
+    // tool a separate ASCII-only config/log/readback staging directory.
     let backup_dir = app_paths::backup_root();
-    let log_dir = app_paths::spft_log_dir();
-    let config_xml = app_paths::readback_config_xml_path();
+    let workspace = ascii_readback_workspace()?;
+    let log_dir = workspace.join("backup").join("spft_log");
+    let config_xml = workspace.join("readback_config.xml");
+    let staged_proinfo = workspace.join("backup").join("proinfo");
     let proinfo_out = app_paths::proinfo_backup_path();
+
+    require_spft_ascii_path(&flash_xml, "펌웨어 flash.xml")?;
+    require_spft_ascii_path(&spft_exe, "SPFlashToolV6.exe")?;
+    require_spft_ascii_path(&workspace, "SPFT 임시 작업 폴더")?;
 
     fs::create_dir_all(&backup_dir)?;
     fs::create_dir_all(&log_dir)?;
-
+    if staged_proinfo.exists() {
+        fs::remove_file(&staged_proinfo)?;
+    }
     if proinfo_out.exists() {
         fs::remove_file(&proinfo_out)?;
     }
 
-    let xml = build_readback_config_xml(&flash_xml, &log_dir, &proinfo_out);
+    let xml = build_readback_config_xml(&flash_xml, &log_dir, &staged_proinfo);
     fs::write(&config_xml, xml.as_bytes())?;
 
     if !config_xml.is_file() {
@@ -83,32 +159,149 @@ pub fn prepare_proinfo_readback(selected_path: &Path) -> Result<ProinfoReadbackP
 }
 
 
+/// Start a read-only SP Flash Tool proinfo operation before the USB PreLoader
+/// appears; that ephemeral port only stays for a few seconds on TB335FC.
+pub struct PrearmedProinfoReadback {
+    events: mpsc::Receiver<ProinfoLiveEvent>,
+    worker: thread::JoinHandle<Result<ProinfoReadbackResult>>,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl PrearmedProinfoReadback {
+    pub fn start(selected_path: &Path) -> Result<Self> {
+        let plan = prepare_proinfo_readback(selected_path)?;
+        Self::start_from_plan(plan)
+    }
+
+    fn start_from_plan(plan: ProinfoReadbackPlan) -> Result<Self> {
+        let (event_tx, event_rx) = mpsc::channel();
+        let (started_tx, started_rx) = mpsc::sync_channel(1);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancelled);
+        let worker = thread::Builder::new()
+            .name("lpmbox-proinfo-prearmed-readback".into())
+            .spawn(move || {
+                execute_prepared_proinfo_readback(
+                    plan,
+                    |event| { let _ = event_tx.send(event); },
+                    Some(&worker_cancel),
+                    Some(started_tx),
+                )
+            })
+            .map_err(|err| LpmError::Spft(format!("SPFlashToolV6 readback 작업 생성 실패: {err}")))?;
+
+        // If the executable cannot even launch, do not reboot the tablet.
+        match started_rx.recv_timeout(Duration::from_secs(12)) {
+            Ok(Ok(())) => {
+                // Confirm the SPFT process stays alive briefly in USB-wait mode.
+                // Fail before reboot if it immediately rejects the config.
+                thread::sleep(Duration::from_millis(250));
+                if worker.is_finished() {
+                    let result = worker.join()
+                        .map_err(|_| LpmError::Spft("SPFT 시작 직후 비정상 종료".into()))?;
+                    return Err(LpmError::Spft(format!(
+                        "SPFlashToolV6가 USB 대기 전에 종료되어 재부팅을 취소합니다: {:?}",
+                        result.err()
+                    )));
+                }
+            }
+            Ok(Err(message)) => {
+                let _ = worker.join();
+                return Err(LpmError::Spft(format!(
+                    "SPFlashToolV6 사전 실행 실패: {message}"
+                )));
+            }
+            Err(_) => {
+                cancelled.store(true, Ordering::Relaxed);
+                let _ = worker.join();
+                return Err(LpmError::Spft(
+                    "SPFlashToolV6 시작 확인 시간 초과: 재부팅 중단".into()
+                ));
+            }
+        }
+        Ok(Self { events: event_rx, worker, cancelled })
+    }
+
+    pub fn finish<F>(self, mut on_event: F) -> Result<ProinfoReadbackResult>
+    where F: FnMut(ProinfoLiveEvent),
+    {
+        while !self.worker.is_finished() {
+            match self.events.recv_timeout(Duration::from_millis(70)) {
+                Ok(event) => on_event(event),
+                Err(mpsc::RecvTimeoutError::Timeout) => {},
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        while let Ok(event) = self.events.try_recv() {
+            on_event(event);
+        }
+        self.worker.join()
+            .map_err(|_| LpmError::Spft("SPFlashToolV6 사전 실행 작업 패닉".into()))?
+    }
+
+    pub fn cancel(self) {
+        self.cancelled.store(true, Ordering::Release);
+        // The worker kills only the process it spawned, not unrelated SPFT.
+        let _ = self.finish(|_| {});
+    }
+}
+
 pub fn execute_proinfo_readback_streaming<F>(
     selected_path: &Path,
-    mut on_event: F,
+    on_event: F,
 ) -> Result<ProinfoReadbackResult>
-where
-    F: FnMut(ProinfoLiveEvent),
+where F: FnMut(ProinfoLiveEvent),
 {
     let plan = prepare_proinfo_readback(selected_path)?;
+    execute_prepared_proinfo_readback(plan, on_event, None, None)
+}
 
-    on_event(ProinfoLiveEvent::Log(
-        "SPFlashToolV6 readback 실행 시작".to_string(),
-    ));
-
+fn execute_prepared_proinfo_readback<F>(
+    plan: ProinfoReadbackPlan,
+    mut on_event: F,
+    cancelled: Option<&AtomicBool>,
+    started: Option<mpsc::SyncSender<std::result::Result<(), String>>>,
+) -> Result<ProinfoReadbackResult>
+where F: FnMut(ProinfoLiveEvent),
+{
+    on_event(ProinfoLiveEvent::Log(format!(
+        "SPFlashToolV6 readback 실행: {} / {}",
+        plan.spft_exe.display(), plan.config_xml.display()
+    )));
     let mut command = Command::new(&plan.spft_exe);
     command.arg("-i").arg(&plan.config_xml);
     command.current_dir(&plan.embedded_tool_dir);
-
-    let output = run_spflashtoolv6_streaming(command, &mut on_event)?;
-
+    let begin = Instant::now();
+    let output = run_spflashtoolv6_streaming(
+        command, &mut on_event, cancelled, started, Some(Duration::from_secs(180)),
+    )?;
+    // Only install a verified successful result into the original backup
+    // folder. Never treat a partial/failed readback as a completed proinfo.
+    let staged_proinfo = plan
+        .config_xml
+        .parent()
+        .ok_or_else(|| LpmError::Spft("SPFT 임시 작업 경로 확인 실패".into()))?
+        .join("backup")
+        .join(
+            plan.proinfo_out.file_name().ok_or_else(||
+                LpmError::Spft("SPFT readback 출력 파일명이 없습니다.".into())
+            )?
+        );
+    if output.success && staged_proinfo.is_file()
+        && fs::metadata(&staged_proinfo)?.len() > 0
+    {
+        fs::copy(&staged_proinfo, &plan.proinfo_out).map_err(|err| {
+            LpmError::Spft(format!(
+                "SPFT proinfo 임시 백업 복사 실패: {} → {} / {err}",
+                staged_proinfo.display(),
+                plan.proinfo_out.display(),
+            ))
+        })?;
+    }
     let proinfo_exists = plan.proinfo_out.is_file();
     let proinfo_size = if proinfo_exists {
         fs::metadata(&plan.proinfo_out)?.len()
-    } else {
-        0
-    };
-
+    } else { 0 };
     let result = ProinfoReadbackResult {
         plan,
         exit_code: output.exit_code,
@@ -117,21 +310,24 @@ where
         proinfo_exists,
         proinfo_size,
     };
-
     if !output.success {
-        return Err(LpmError::Spft(format!(
-            "SPFlashToolV6 readback 실패 / exit_code={:?} / stderr={}",
-            result.exit_code, result.stderr_tail
-        )));
+        let diagnostic = format!(
+            "SPFlashToolV6 readback 실패 / exit_code={:?} / elapsed={}ms / stdout={} / stderr={} / SPFT 로그 폴더={}",
+            result.exit_code,
+            begin.elapsed().as_millis(),
+            result.stdout_tail.trim(),
+            result.stderr_tail.trim(),
+            result.plan.log_dir.display(),
+        );
+        on_event(ProinfoLiveEvent::Log(format!("[SPFT] {diagnostic}")));
+        return Err(LpmError::Spft(diagnostic));
     }
-
     if !result.proinfo_exists || result.proinfo_size == 0 {
         return Err(LpmError::Spft(format!(
-            "SPFlashToolV6 실행은 완료됐지만 proinfo 백업 파일이 생성되지 않았습니다: {}",
+            "SPFlashToolV6는 종료했지만 proinfo 백업 파일이 없습니다: {}",
             result.plan.proinfo_out.display()
         )));
     }
-
     Ok(result)
 }
 
@@ -178,7 +374,7 @@ where
     command.arg("-c").arg("download");
     command.current_dir(&embedded_tool_dir);
 
-    let output = run_spflashtoolv6_streaming(command, &mut on_event)?;
+    let output = run_spflashtoolv6_streaming(command, &mut on_event, None, None, None)?;
 
     if !output.success {
         return Err(LpmError::Spft(format!(
@@ -211,6 +407,9 @@ struct PipeLine {
 fn run_spflashtoolv6_streaming<F>(
     mut command: Command,
     on_event: &mut F,
+    cancelled: Option<&AtomicBool>,
+    started: Option<mpsc::SyncSender<std::result::Result<(), String>>>,
+    readback_timeout: Option<Duration>,
 ) -> Result<SpftStreamingOutput>
 where
     F: FnMut(ProinfoLiveEvent),
@@ -223,9 +422,19 @@ where
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = command
-        .spawn()
-        .map_err(|err| LpmError::Spft(format!("SPFlashToolV6 실행 실패: {err}")))?;
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            if let Some(started) = started {
+                let _ = started.send(Err(err.to_string()));
+            }
+            return Err(LpmError::Spft(format!("SPFlashToolV6 실행 실패: {err}")));
+        }
+    };
+    if let Some(started) = started {
+        let _ = started.send(Ok(()));
+    }
+    on_event(ProinfoLiveEvent::Log(format!("[SPFT] 프로세스 시작 PID={}", child.id())));
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -242,11 +451,24 @@ where
 
     drop(line_tx);
 
+    let begin = Instant::now();
     let mut stdout_tail = String::new();
     let mut stderr_tail = String::new();
     let mut last_progress: Option<(String, u8)> = None;
 
     loop {
+        if readback_timeout.is_some_and(|limit| begin.elapsed() >= limit) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(LpmError::Spft(format!(
+                "SPFlashToolV6 proinfo 읽기 180초 시간 초과 (USB/DA 연결 또는 로그 확인 필요) / stdout={stdout_tail} / stderr={stderr_tail}"
+            )));
+        }
+        if cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(LpmError::Spft("SPFlashToolV6 readback 취소: PreLoader 검증 실패".into()));
+        }
         while let Ok(pipe_line) = line_rx.try_recv() {
             handle_spflashtoolv6_pipe_line(
                 pipe_line,
@@ -779,6 +1001,12 @@ fn embedded_tool_dir() -> PathBuf {
 }
 
 fn extract_embedded_spflashtoolv6_zip(target_dir: &Path) -> Result<()> {
+    if SPFT_TOOL_ZIP.is_empty() {
+        return Err(LpmError::Spft(format!(
+            "SPFlashToolV6 외부 도구 파일이 없습니다. 자동 다운로드가 실패했고 로컬 캐시에도 없습니다. 다운로드 후 다음 경로에 ZIP을 배치해주세요: {}",
+            app_paths::spflashtoolv6_zip_path().display()
+        )));
+    }
     let reader = Cursor::new(SPFT_TOOL_ZIP);
     let mut archive = zip::ZipArchive::new(reader).map_err(zip_error)?;
 
@@ -955,3 +1183,45 @@ fn tail_text(value: &str, max_chars: usize) -> String {
         .iter()
         .collect()
 }
+
+
+#[cfg(test)]
+mod ascii_readback_tests {
+    use super::*;
+
+    #[test]
+    fn detects_non_ascii_spft_paths() {
+        assert!(ascii_spft_path(Path::new(r"G:\TB375FC, TB373FU\Readback")));
+        assert!(!ascii_spft_path(Path::new(r"G:\TB375FC, TB373FU\수정 중")));
+    }
+
+    #[test]
+    fn generated_config_uses_original_read_only_partition_command() {
+        let xml = build_readback_config_xml(
+            Path::new(r"G:\ROM\image\download_agent\flash.xml"),
+            Path::new(r"G:\SPFT_Readback\backup\spft_log"),
+            Path::new(r"G:\SPFT_Readback\backup\proinfo"),
+        );
+        assert!(xml.is_ascii());
+        assert!(xml.contains("<READ-PARTITION version=\"1.0\" partition=\"proinfo\">"));
+        assert!(xml.contains("<REBOOT version=\"1.0\" action=\"COLD-RESET\"/>"));
+        assert!(xml.contains(r#"log_path="G:\SPFT_Readback\backup\spft_log""#));
+    }
+
+    #[test]
+    fn ascii_workspace_can_be_created_under_writable_runtime() {
+        let path = ascii_readback_workspace().unwrap();
+        assert!(path.is_dir());
+        assert!(ascii_spft_path(&path));
+    }
+}
+
+
+// Separate read-only active LK readback, reusing the original proinfo SPFT worker.
+mod active_lk;
+pub use active_lk::{PrearmedActiveLkReadback, prepare_active_lk_readback};
+
+mod partition_tools;
+pub use partition_tools::{prepare_partition_dump, start_partition_dump, execute_partition_flash_streaming};
+mod partition_batch;
+pub use partition_batch::{ScatterPartition, PartitionSelection, PrearmedPartitionBatch, scan_firmware_partition_table};

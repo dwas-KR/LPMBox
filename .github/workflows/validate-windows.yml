@@ -1,0 +1,29 @@
+name: LPMBox Windows Validation
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain from rust-toolchain.toml
+        uses: dtolnay/rust-toolchain@stable
+      - name: Python packaging checks
+        run: python -m unittest discover -s packaging -p "test_*.py" -v
+      - name: Test all LPMBox crates and locale catalogs
+        run: cargo test --workspace --locked
+      - name: Build Windows Release executable
+        run: cargo build --release --locked -p lpmbox-gui
+      - name: Package Windows EXE and full sources
+        run: python packaging/package_windows.py --output dist
+      - name: Upload tested archives (no publishing)
+        uses: actions/upload-artifact@v4
+        with:
+          name: lpmbox-windows-validated
+          path: dist/*

@@ -137,8 +137,18 @@ pub fn inspect_firmware(image_dir: &Path) -> Result<FirmwareInfo> {
 
     let version = extract_version(&upper);
     let region = extract_region(&upper, version.as_deref());
-    let rules = block_firmware_rules_for_inspection();
-    let blocked_firmware_check = check_blocked_firmware(&model, version.as_deref(), rules.as_deref());
+    // v3.1.23: user-requested disablement of the legacy remote
+    // firmware-version blacklist. This does NOT disable platform/model,
+    // image-integrity, partition mapping, or the required LK hash checks.
+    // Avoid network fetching a blacklist that is no longer enforced.
+    let mut blocked_firmware_check =
+        check_blocked_firmware(&model, version.as_deref(), None);
+    blocked_firmware_check.blocked = false;
+    blocked_firmware_check.blocked_versions.clear();
+    blocked_firmware_check.matched_version = None;
+    blocked_firmware_check.message = format!(
+        "{model}: 펌웨어 버전별 온라인 설치 금지 정책 해제.          기기/플랫폼/패치 파일 검사는 계속 적용됩니다."
+    );
 
     let flash_xml = find_flash_xml(image_dir);
 

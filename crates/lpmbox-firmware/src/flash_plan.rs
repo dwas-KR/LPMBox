@@ -1,4 +1,6 @@
 use crate::guard::inspect_firmware;
+use crate::lk_patch;
+use crate::lk_model_policy;
 use crate::scatter::parse_scatter_xml;
 use crate::xml_crypto::decrypt_scatter_x;
 use lpmbox_core::{
@@ -14,16 +16,6 @@ const EXTRA_PARTITION_FILES_FULL: &[&str] = &["lk_a", "lk_b", "dtbo_a", "dtbo_b"
 const EXTRA_PARTITION_FILES_A_ONLY: &[&str] = &["lk_a", "dtbo_a"];
 
 const EXTRA_PARTITION_PACKAGES: &[(&str, &str, &str)] = &[
-    (
-        "TB375FC",
-        "TB375FC",
-        "https://raw.githubusercontent.com/dwas-KR/LPMBox/799bfde0a73a1c310e111f047ebece6d58131aac/TB375FC.zip",
-    ),
-    (
-        "TB373FU",
-        "TB375FC",
-        "https://raw.githubusercontent.com/dwas-KR/LPMBox/799bfde0a73a1c310e111f047ebece6d58131aac/TB375FC.zip",
-    ),
     (
         "TB365FC",
         "TB365FC",
@@ -46,6 +38,97 @@ const EXTRA_PARTITION_PACKAGES: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// Validate model / version / selected LK bytes before any device reboot,
+/// proinfo backup, country-code change, or SP Flash Tool write. This is a
+/// read-only preflight. The normal Flash Plan will repeat the same check.
+pub fn preflight_lk_before_device_changes<F>(
+    image_dir:&Path,
+    model:&str,
+    region:lpmbox_core::RomRegion,
+    version:Option<&str>,
+    mode:InstallMode,
+    on_log:&mut F,
+)->Result<()>
+where F: FnMut(String){
+    // Diagnose the original PRC321 LK and pre-staged lk_a before selecting
+    // the user-confirmed cross-region candidate. This is read-only.
+    if model.eq_ignore_ascii_case("TB335FC")
+        && matches!(region,lpmbox_core::RomRegion::Prc)
+        && version==Some(crate::lk_input_audit::VERSION)
+        && !matches!(mode,InstallMode::CountryReset){
+        if let Err(err)=crate::lk_input_audit::log_prc321_audit(image_dir,on_log){
+            on_log(format!(
+                "[LK 출처 참고] TB335FC PRC321 원본 LK 진단: {err}.                  출처 진단은 공통 LK 적용을 제한하지 않습니다."
+            ));
+        }
+    }
+    // Research-only inspection of the exact TB361FU ROW375 source is
+    // read-only. It MUST NOT change the LK authentication failure policy.
+    // This reports the candidate's source hash before the existing guard
+    // refuses any SP Flash Tool device write.
+    if model.eq_ignore_ascii_case("TB361FU")
+        && matches!(region,lpmbox_core::RomRegion::Row)
+        && version==Some("ZUI_17.5.10.375_ST")
+        && !matches!(mode,InstallMode::CountryReset){
+        match crate::lk_region_family_research::inspect_stock_only(
+            &image_dir.join("lk.img"),
+            crate::lk_region_family_research::ResearchModel::Tb361FuRow375
+        ){
+            Ok(report)=>{
+                on_log(format!(
+                    "[LK 오프라인 연구] TB361FU ROW375: 원본 SHA-256={} / override 후보 SHA-256={} / 인증 자료(cert1)={} / 분기 위치=0x{:X}. 기존 override는 SPFT Signature(Entity) invalid로 거부되어 자동 플래싱하지 않습니다.",
+                    report.input_sha256,report.output_sha256,
+                    report.cert1_sha256,report.first_branch_offset
+                ));
+                match fs::read(image_dir.join("lk.img")).map_err(LpmError::Io)
+                    .and_then(|stock|crate::lk_region_family_research::build_offline_candidate_with_mode(
+                        &stock,
+                        crate::lk_region_family_research::ResearchModel::Tb361FuRow375,
+                        crate::lk_region_family_research::ResearchCertMode::Wrap
+                    )){
+                    Ok((_,wrap))=>on_log(format!(
+                        "[LK 오프라인 연구] TB361FU ROW375 wrap 후보 SHA-256={} / {}바이트. 새로운 연구 방식이며 SPFT 인증 및 실제 부팅은 미검증. 자동 플래싱하지 않습니다.",
+                        wrap.output_sha256,wrap.output_bytes
+                    )),
+                    Err(err)=>on_log(format!(
+                        "[LK 오프라인 연구] wrap 분석 불가: {err}. 자동 플래싱은 차단합니다."
+                    ))
+                }
+            },
+            Err(err)=>on_log(format!(
+                "[LK 오프라인 연구] TB361FU ROW375 원본 구조 확인 실패: {err}. 자동 플래싱은 차단합니다."
+            )),
+        }
+    }
+    lk_model_policy::enforce_before_flash_plan(model,region,version,mode,on_log)?;
+    let required=lk_model_policy::requirement(model,region,version,mode)?;
+    if matches!(required,lk_model_policy::LkRequirement::Tb335PrcSharedUserBoottested){
+        let report=crate::tb335_prc_shared_lk::preflight_prc_shared_lk(
+            image_dir,version
+        )?;
+        on_log(format!(
+            "[LK 사전검사] TB335FC PRC {} (기준 초과 공통 적용): 원본 LK SHA-256={} / 공통 LPMBOX_lk.img SHA-256={} / 기존 목록 지문 일치={}",
+            version.unwrap_or("UNKNOWN"),report.original_sha256,
+            report.result_sha256,report.known_stock_hash
+        ));
+        if !report.known_stock_hash{
+            on_log(
+                "[LK 사전검사] 원본 LK 지문이 등록되지 않은 상위 PRC 버전입니다. 별도 버전 제한 없이 동일한 공통 LPMBOX_lk.img를 적용합니다.".into()
+            );
+        }
+    }
+    if matches!(required,lk_model_policy::LkRequirement::Tb336Row321UserBoottested){
+        let stock_sha=crate::experimental_lk_trial::validate_selected_tb336_row_lk(
+            image_dir,version
+        )?;
+        on_log(format!(
+            "[LK 사전검사] {} {}: 원본 lk.img SHA-256={} / ROW321 공통 후보 SHA-256={} (파일 읽기만 수행)",
+            model,version.unwrap_or("UNKNOWN"),stock_sha,
+            crate::experimental_lk_trial::EXPECTED_TRIAL_SHA
+        ));
+    }
+    Ok(())
+}
 pub fn prepare_flash_plan(selected_path: &Path, mode: InstallMode) -> Result<FlashPreparedOutput> {
     prepare_flash_plan_with_log(selected_path, mode, |_| {})
 }
@@ -59,7 +142,7 @@ pub fn prepare_flash_plan_with_country_code_log<F>(
 where
     F: FnMut(String),
 {
-    prepare_flash_plan_internal(selected_path, mode, selected_country_code, &mut on_log)
+    prepare_flash_plan_internal(selected_path, mode, selected_country_code, None, &mut on_log)
 }
 
 pub fn prepare_flash_plan_with_log<F>(
@@ -70,13 +153,27 @@ pub fn prepare_flash_plan_with_log<F>(
 where
     F: FnMut(String),
 {
-    prepare_flash_plan_internal(selected_path, mode, None, &mut on_log)
+    prepare_flash_plan_internal(selected_path, mode, None, None, &mut on_log)
+}
+
+pub fn prepare_flash_plan_with_active_lk_log<F>(
+    selected_path: &Path,
+    mode: InstallMode,
+    selected_country_code: Option<&str>,
+    active_lk_readback: &Path,
+    mut on_log: F,
+) -> Result<FlashPreparedOutput>
+where F: FnMut(String) {
+    prepare_flash_plan_internal(
+        selected_path, mode, selected_country_code, Some(active_lk_readback), &mut on_log
+    )
 }
 
 fn prepare_flash_plan_internal<F>(
     selected_path: &Path,
     mode: InstallMode,
     selected_country_code: Option<&str>,
+    active_lk_readback: Option<&Path>,
     on_log: &mut F,
 ) -> Result<FlashPreparedOutput>
 where
@@ -151,6 +248,72 @@ where
         }
     }
 
+    // Validate exact model/ROM LK requirements before any device write.
+    // TB336FU ROW321/348 and TB335FC PRC>299 use the user-confirmed
+    // same-family, SHA-256 pinned candidate. This is not a cross-family
+    // TB361FU/TB365FC approval. Other model paths remain unchanged.
+    preflight_lk_before_device_changes(
+        &image_dir,&firmware.model,firmware.region,
+        firmware.version.as_deref(),mode,on_log
+    )?;
+
+    // TB336FU ROW 321 exact-version user-boot-tested candidate:
+    // stage a separate, pinned LK_A file BEFORE standard ROM staging.
+    // This does not write to the device; SPFT uses the selected scatter.
+    let use_row321_user_lk = matches!(
+        lk_model_policy::requirement(
+            &firmware.model, firmware.region, firmware.version.as_deref(),mode
+        )?,
+        lk_model_policy::LkRequirement::Tb336Row321UserBoottested
+    );
+    let use_tb335_prc_shared_lk=matches!(
+        lk_model_policy::requirement(
+            &firmware.model,firmware.region,firmware.version.as_deref(),mode
+        )?,
+        lk_model_policy::LkRequirement::Tb335PrcSharedUserBoottested
+    );
+    let tb335_prc_shared_report=if use_tb335_prc_shared_lk{
+        let report=crate::tb335_prc_shared_lk::stage_prc_shared_lk(
+            &image_dir,firmware.version.as_deref()
+        )?;
+        on_log(format!(
+            "[LK 패치] TB335FC PRC {}: 공통 LK 파일={} / 원본 SHA-256={} / 패치 SHA-256={}",
+            firmware.version.as_deref().unwrap_or("UNKNOWN"),
+            report.staged_path.display(),report.original_sha256,
+            report.result_sha256
+        ));
+        Some(report)
+    }else{None};
+    let use_row375_patched_lk=matches!(
+        lk_model_policy::requirement(
+            &firmware.model,firmware.region,firmware.version.as_deref(),mode
+        )?,
+        lk_model_policy::LkRequirement::Tb361Row375Experimental
+    );
+    let row375_lk_report=if use_row375_patched_lk{
+        let report=crate::tb361fu_row375_lk::stage_exact_row375_patch(&image_dir)?;
+        on_log(format!(
+            "[LK 패치][미검증] TB361FU ROW375: 순정 해시={} / 결과 해시={} / 명령어=0x{:X} / 크기={} / 출력={}",
+            report.source_sha256,report.output_sha256,report.patch_offset,
+            report.output_size,report.output_path.display()
+        ));
+        Some(report)
+    }else{None};
+    let row321_lk_report=if use_row321_user_lk {
+        let report=crate::experimental_lk_trial::stage_user_boottested_row321_lk(
+            &image_dir,firmware.version.as_deref()
+        )?;
+        on_log(format!(
+            "[LK 패치] TB336FU ROW 입력 원본 SHA-256={} / 실기기 부팅 확인 후보 SHA-256={}",
+            report.original_sha256,report.candidate_sha256
+        ));
+        on_log(format!(
+            "[LK 패치] 변경 위치=0x{:X}, 크기 변화 +{}B, LK_A 전용 파일={}",
+            report.patch_offset,report.size_delta,report.staged_path.display()
+        ));
+        Some(report)
+    }else{None};
+
     let source_flash_xml = resolve_flash_xml(&image_dir)?;
     let da_path = resolve_da_path(&image_dir)?;
 
@@ -168,8 +331,42 @@ where
 
     let title = install_mode_title(mode).to_string();
 
-    remove_row_lk_dtbo_img_files(firmware.region, &image_dir, on_log)?;
-    prepare_extra_partition_files_for_model(&firmware.model, &image_dir, on_log)?;
+    // Keep PRC stock LK/DTBO and source scatter references intact for the
+    // <=060 generation. Higher PRC versions need a SHA-256 verified LK patch.
+    // ROW keeps its previously validated 084+ patch and DTBO staging route.
+    let mut prc_patched_lk = None;
+    if lk_patch::is_tb375_family(&firmware.model) {
+        if !matches!(mode, InstallMode::CountryReset) {
+            match firmware.region {
+                lpmbox_core::RomRegion::Prc => {
+                    let changed = lk_patch::prepare_prc_lk_for_version(
+                        &image_dir,firmware.version.as_deref(),on_log
+                    )?;
+                    prc_patched_lk = Some(changed);
+                }
+                lpmbox_core::RomRegion::Row => {
+                    lk_patch::prepare_local_lk_dtbo_from_readback(
+                        firmware.region,firmware.version.as_deref(),
+                        &image_dir,active_lk_readback,on_log
+                    )?;
+                }
+                lpmbox_core::RomRegion::Unknown => {
+                    return Err(LpmError::InvalidFirmwareFolder(
+                        "PRC/ROW 펌웨어 지역 확인 실패".to_string()
+                    ));
+                }
+            }
+        }
+    } else {
+        if use_row321_user_lk || use_row375_patched_lk {
+            // Keep the exact-hash source lk.img for subsequent re-validation.
+            // Stock scatter will not reference this file after LK_A mapping.
+            on_log("[LK 패치] 해시 검증된 ROW 원본 lk.img/dtbo.img를 삭제하지 않고 보존합니다.".into());
+        }else{
+            remove_row_lk_dtbo_img_files(firmware.region, &image_dir, on_log)?;
+        }
+        prepare_extra_partition_files_for_model(&firmware.model, &image_dir, on_log)?;
+    }
 
     let work_dir = image_dir.clone();
 
@@ -179,9 +376,83 @@ where
         .unwrap_or_else(|| image_dir.join("download_agent"));
 
     let work_scatter_xml = build_lpmbox_scatter_path(&source_scatter, &platform);
+    let mut target_partitions = selected_snapshot.partitions.clone();
+    if let Some(report)=&row321_lk_report{
+        if !report.staged_path.is_file(){
+            return Err(LpmError::InvalidFirmwareFolder(
+                "TB336FU ROW321 LPMBOX_lk.img 결과 파일이 없습니다.".into()
+            ));
+        }
+        on_log("[LK 패치] TB336FU 공통 LK: LPMBOX_lk.img 생성과 해시 검증 완료.".into());
+    }
+    if let Some(patched)=prc_patched_lk{
+        lk_patch::keep_prc_stock_image_references(&mut target_partitions,patched);
+        on_log(format!("[LK] PRC LK/DTBO scatter 경로 설정: LK 패치={patched}"));
+    }
+    let patched_supported=
+        row375_lk_report.is_some()
+        || row321_lk_report.is_some()
+        || tb335_prc_shared_report.is_some()
+        || (prc_patched_lk==Some(true))
+        || (lk_patch::is_tb375_family(&firmware.model)
+            && firmware.region==lpmbox_core::RomRegion::Row
+            && !matches!(mode,InstallMode::CountryReset));
+    if patched_supported{
+        let output=image_dir.join(lk_patch::LPMBOX_PATCHED_LK_FILENAME);
+        if !output.is_file(){
+            return Err(LpmError::InvalidFirmwareFolder(format!(
+                "패치된 LK 파일이 없습니다: {}",
+                output.display()
+            )));
+        }
+        apply_unified_patched_lk_to_scatter(
+            &mut target_partitions,
+            &firmware.model,
+            lk_patch::LPMBOX_PATCHED_LK_FILENAME
+        )?;
+        on_log(format!(
+            "[LK] {} {}: LK_A/LK_B 파일명=LPMBOX_lk.img, LK_B 다운로드={}",
+            firmware.model,
+            firmware.version.as_deref().unwrap_or("UNKNOWN"),
+            if matches!(firmware.model.as_str(),"TB335FC"|"TB336FU"|"TB365FC"|"TB361FU"){
+                "false"
+            }else{"true"}
+        ));
+    }
+    // This must run for all MT6835 ROM plans, including baseline PRC builds
+    // that intentionally do not create a patched LK image.
+    let mt6835_lk_b_guard_count=
+        protect_mt6835_lk_b(&mut target_partitions,&firmware.model);
+    if mt6835_lk_b_guard_count>0{
+        on_log(format!(
+            "[LK 보호] {}: lk_b 다운로드/업데이트 플래그 비활성화",
+            firmware.model
+        ));
+    }
+    // Apply the same sensitive-partition protection to every supported
+    // ROW LK route, including the boot-tested TB336FU ROW321 and the
+    // exact-input TB361FU ROW375 research patch.
+    let row_lk_guard = matches!(firmware.region, lpmbox_core::RomRegion::Row)
+        && (lk_patch::is_tb375_family(&firmware.model)
+            || (firmware.model.eq_ignore_ascii_case("TB361FU") && use_row375_patched_lk)
+            || (firmware.model.eq_ignore_ascii_case("TB336FU") && use_row321_user_lk));
+    // TB335FC PRC high-version LK stays LK_A-only via
+    // protect_mt6835_lk_b, without altering the existing PRC partition
+    // selection or device-stage sequence.
+    let protected_count = mt6835_lk_b_guard_count + if row_lk_guard
+    {
+        let count = lk_patch::protect_tb373_row_downloads(&mut target_partitions);
+        on_log(format!(
+            "[LK 보호] ROW 전용 LK 설치: PreLoader, efuse, misc/para/metadata 등 보호 파티션 {}개 항목 비활성화",
+            count
+        ));
+        count
+    } else {
+        0
+    };
     write_patched_scatter_xml(
         &source_scatter,
-        &selected_snapshot.partitions,
+        &target_partitions,
         &work_scatter_xml,
         selected_country_code,
         mode,
@@ -244,7 +515,7 @@ where
         selected_patch_plan,
         selected_patch_validation,
         generated_scatter_info,
-        changed_count: selected_snapshot.changed_count,
+        changed_count: selected_snapshot.changed_count + protected_count,
     })
 
 }
@@ -277,6 +548,69 @@ fn resolve_root_and_image_dir(selected_path: &Path) -> Result<(PathBuf, PathBuf)
         "image 폴더 또는 image 폴더를 포함한 root 폴더를 선택해야 합니다: {}",
         selected_path.display()
     )))
+}
+
+
+/// Map only a precisely prepared LK image in the generated scatter.
+/// MT6835 families: LK_B must never be downloaded. TB373/TB375 keep
+/// distinct A/B entries but refer to the same verified patched file.
+fn apply_unified_patched_lk_to_scatter(
+    partitions:&mut [ScatterPartition],
+    model:&str,
+    filename:&str
+)->Result<()>{
+    if filename!=lk_patch::LPMBOX_PATCHED_LK_FILENAME {
+        return Err(LpmError::InvalidFirmwareFolder(format!(
+            "LK 생성 파일명은 {}여야 합니다.",lk_patch::LPMBOX_PATCHED_LK_FILENAME
+        )));
+    }
+    for slot in ["lk_a","lk_b"]{
+        if partitions.iter().filter(|p|p.name.eq_ignore_ascii_case(slot)).count()!=1{
+            return Err(LpmError::InvalidFirmwareFolder(format!(
+                "{model}: Scatter에 {slot} 항목이 정확히 한 개 있어야 합니다."
+            )));
+        }
+    }
+    let is_mt6835=matches!(
+        model.to_ascii_uppercase().as_str(),
+        "TB335FC" | "TB336FU" | "TB365FC" | "TB361FU"
+    );
+    for p in partitions.iter_mut(){
+        if p.name.eq_ignore_ascii_case("lk_a"){
+            p.file_name=Some(filename.to_owned());
+            p.is_download=Some("true".into());
+        }else if p.name.eq_ignore_ascii_case("lk_b"){
+            p.file_name=Some(filename.to_owned());
+            p.is_download=Some((if is_mt6835{"false"}else{"true"}).into());
+            if is_mt6835{
+                p.is_upgradable=Some("false".into());
+            }
+        }
+    }
+    Ok(())
+}
+
+
+/// Enforce the documented MT6835 B-slot exclusion even when no LK patch
+/// is required for an older PRC firmware.
+fn protect_mt6835_lk_b(
+    partitions:&mut [ScatterPartition],model:&str
+)->usize{
+    let is_mt6835=matches!(model.to_ascii_uppercase().as_str(),
+        "TB335FC" | "TB336FU" | "TB365FC" | "TB361FU");
+    if !is_mt6835{return 0;}
+    let mut changed=0usize;
+    for p in partitions.iter_mut().filter(|p|p.name.eq_ignore_ascii_case("lk_b")){
+        if p.is_download.as_deref()!=Some("false"){
+            p.is_download=Some("false".into());
+            changed+=1;
+        }
+        if p.is_upgradable.as_deref()!=Some("false"){
+            p.is_upgradable=Some("false".into());
+            changed+=1;
+        }
+    }
+    changed
 }
 
 fn remove_row_lk_dtbo_img_files<F>(
@@ -1334,4 +1668,81 @@ fn find_file_recursively(root: &Path, file_name: &str) -> Option<PathBuf> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod unified_lk_scatter_tests{
+    use super::*;
+    fn part(name:&str,file:&str,enabled:bool)->ScatterPartition{
+        ScatterPartition{
+            name:name.into(),file_name:Some(file.into()),
+            is_download:Some(if enabled{"true"}else{"false"}.into()),
+            partition_index:None,is_upgradable:Some("true".into()),
+            partition_type:None,storage:None,linear_start_addr:None,
+            physical_start_addr:None,partition_size:None
+        }
+    }
+    #[test]
+    fn mt6835_scatters_always_disable_lk_b(){
+        for model in ["TB335FC","TB336FU","TB365FC","TB361FU"]{
+            let mut p=vec![part("lk_a","original",false),part("lk_b","original",true),
+                part("dtbo_a","dtbo_a",true)];
+            apply_unified_patched_lk_to_scatter(
+                &mut p,model,lk_patch::LPMBOX_PATCHED_LK_FILENAME
+            ).unwrap();
+            assert_eq!(p[0].file_name.as_deref(),Some("LPMBOX_lk.img"));
+            assert_eq!(p[0].is_download.as_deref(),Some("true"));
+            assert_eq!(p[1].file_name.as_deref(),Some("LPMBOX_lk.img"));
+            assert_eq!(p[1].is_download.as_deref(),Some("false"));
+            assert_eq!(p[1].is_upgradable.as_deref(),Some("false"));
+            assert_eq!(p[2].file_name.as_deref(),Some("dtbo_a"));
+            let xml="<partition_index><partition_name>lk_b</partition_name><file_name>lk_b</file_name><is_download>true</is_download></partition_index>";
+            let map=HashMap::from([("lk_b".into(),p[1].clone())]);
+            let out=patch_scatter_xml_text(xml,&map);
+            assert!(out.contains("<file_name>LPMBOX_lk.img</file_name>"));
+            assert!(out.contains("<is_download>false</is_download>"));
+        }
+    }
+    #[test]
+    fn tb375_tb373_both_scatter_entries_target_verified_lk(){
+        for model in ["TB375FC","TB373FU"]{
+            let mut p=vec![part("lk_a","original",false),part("lk_b","original",false)];
+            apply_unified_patched_lk_to_scatter(
+                &mut p,model,lk_patch::LPMBOX_PATCHED_LK_FILENAME
+            ).unwrap();
+            for slot in p{
+                assert_eq!(slot.file_name.as_deref(),Some("LPMBOX_lk.img"));
+                assert_eq!(slot.is_download.as_deref(),Some("true"));
+            }
+        }
+    }
+    #[test]
+    fn even_baseline_prc_never_downloads_mt6835_lk_b(){
+        for model in ["TB335FC","TB336FU","TB365FC","TB361FU"]{
+            let mut partitions=vec![
+                part("lk_a","lk_a",true),part("lk_b","lk_b",true),
+                part("boot_a","boot_a",true)
+            ];
+            assert_eq!(protect_mt6835_lk_b(&mut partitions,model),2);
+            assert_eq!(partitions[0].is_download.as_deref(),Some("true"));
+            assert_eq!(partitions[1].file_name.as_deref(),Some("lk_b"));
+            assert_eq!(partitions[1].is_download.as_deref(),Some("false"));
+            assert_eq!(partitions[1].is_upgradable.as_deref(),Some("false"));
+            assert_eq!(partitions[2].is_download.as_deref(),Some("true"));
+            assert_eq!(protect_mt6835_lk_b(&mut partitions,model),0);
+        }
+        let mut different=vec![part("lk_b","lk_b",true)];
+        assert_eq!(protect_mt6835_lk_b(&mut different,"TB373FU"),0);
+    }
+    #[test]
+    fn invalid_names_and_missing_slots_are_rejected(){
+        assert!(apply_unified_patched_lk_to_scatter(
+            &mut [part("lk_a","lk_a",true),part("lk_b","lk_b",false)],
+            "TB336FU","lk_a").is_err());
+        assert!(apply_unified_patched_lk_to_scatter(
+            &mut [part("lk_a","lk_a",true)],"TB336FU","LPMBOX_lk.img").is_err());
+        assert!(apply_unified_patched_lk_to_scatter(
+            &mut [part("lk_a","lk_a",true),part("lk_a","lk_a",true),
+                part("lk_b","lk_b",true)],"TB336FU","LPMBOX_lk.img").is_err());
+    }
 }

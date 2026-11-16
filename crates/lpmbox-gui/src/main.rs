@@ -1,4 +1,16 @@
 #![windows_subsystem = "windows"]
+// SPDX-License-Identifier: GPL-3.0-only
+
+mod appearance;
+mod log_cleanup;
+mod cache_cleanup;
+mod rom_lk;
+mod country_flags;
+mod partition_wizard;
+use partition_wizard::{PartitionWizard,PartitionWizardMsg,PartitionMode};
+include!("gbst_shell.rs");
+use iced::widget::Space;
+use appearance::{AccentChoice, Appearance, ThemeChoice, system_prefers_dark};
 
 use chrono::Local;
 use image as image_crate;
@@ -16,9 +28,11 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const WINDOW_WIDTH: f32 = 800.0;
-const WINDOW_HEIGHT: f32 = 600.0;
-const APP_DISPLAY_VERSION: &str = env!("CARGO_PKG_VERSION");
+// Reference Windows screenshot: 1056 × 752 px. Keep smaller-window
+// support through the existing resizable/min_size settings.
+const WINDOW_WIDTH: f32 = 1085.0;
+const WINDOW_HEIGHT: f32 = 745.0;
+const APP_DISPLAY_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 
 const BODY_FONT: u32 = 15;
 const LOG_FONT: u32 = 12;
@@ -42,6 +56,11 @@ const WARNING_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/waring.png");
 const NAV_HOME_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/nav_home.png");
 const NAV_REFRESH_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/nav_refresh.png");
 const NAV_TAB_SETTINGS_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/nav_tab_settings.png");
+// Lucide icons matching LTBox 3.3.5's nav_root (lock-open),
+// nav_unroot (lock) and nav_about (info) glyphs, rasterized as RGBA.
+const NAV_LTBOX_ROOT_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/nav_ltbox_root.png");
+const NAV_LTBOX_UNROOT_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/nav_ltbox_unroot.png");
+const NAV_LTBOX_INFO_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/nav_ltbox_info.png");
 const NAV_FIRMWARE_DOWNLOAD_ICON_BYTES: &[u8] =
     include_bytes!("../assets/icons/nav_firmware_download.png");
 const NAV_QNA_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/nav_qna.png");
@@ -103,9 +122,10 @@ const LOADING_PROGRESS_FRAME_BYTES: [&[u8]; 15] = [
 const LOADING_PROGRESS_SIZE: u32 = 74;
 const LOADING_PROGRESS_ACTIVE_ALPHA_THRESHOLD: u8 = 220;
 
-const SIDEBAR_RAIL_WIDTH: f32 = 64.0;
-const SIDEBAR_EXPANDED_WIDTH: f32 = 210.0;
-const NAV_BTN_HEIGHT: f32 = 38.0;
+const SIDEBAR_RAIL_WIDTH: f32 = 80.0;
+const SIDEBAR_EXPANDED_WIDTH: f32 = 232.0;
+const EXPANDED_CONTENT_WIDTH: f32 = 1000.0;
+const NAV_BTN_HEIGHT: f32 = 56.0;
 
 const LOG_WRAP_CHARS: usize = 86;
 
@@ -181,10 +201,7 @@ fn load_saved_language_code() -> Option<String> {
 
 fn save_language_option(language: LanguageOption) {
     let path = lpm_language_config_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(path, language.code());
+    let _ = lpmbox_core::config_store::write_atomically(&path, language.code().as_bytes());
 }
 
 
@@ -1788,6 +1805,11 @@ fn lpm_translate_known_runtime_log(lang: LanguageOption, text: &str) -> Option<S
     if let Some(rest) = text.strip_prefix("[Log] ") {
         if let Some((flow, remainder)) = rest.split_once(" 작업 로그를 ") {
             if let Some(path) = remainder.strip_suffix("에 저장합니다.") {
+                // Dynamic task labels must be localized as well as the log prefix.
+                // The old formatting left "설치" behind for non-Korean users.
+                let flow = lpm_translate_exact(lang, flow)
+                    .or_else(|| lpm_translate_exact_stage5(lang, flow))
+                    .unwrap_or(flow);
                 return Some(format!(
                     "{}{flow}: {path}",
                     lpm_lang_text(
@@ -1966,12 +1988,32 @@ fn lpm_translate_owned(content: String) -> String {
     let lang = active_language_option();
 
     if lang.is_korean() {
-        return content;
+        return lpmbox_core::language_catalog::translate_fixed(lang.code(), &content)
+            .unwrap_or(content);
     }
 
     let (content, spinner_frame) = detach_spinner_frame_owned(content);
 
+    // JSON catalogs take precedence for complete UI messages.
+    let catalog_key = if content == "선택한 경로에 image 폴더가 없습니다. image 폴더 또는 그 상위 폴더를 선택해주세요." {
+        Some("lpm.folder.missing_image")
+    } else {
+        None
+    };
+    if let Some(key) = catalog_key {
+        let text = lpmbox_core::language_catalog::translate(lang.code(), key);
+        return if let Some(frame) = spinner_frame {
+            format!("{} {}", text.trim_end(), frame)
+        } else {
+            text
+        };
+    }
+
     let translated = if let Some(translated) =
+        lpmbox_core::language_catalog::translate_fixed(lang.code(), content.as_str())
+    {
+        translated
+    } else if let Some(translated) =
         lpm_translate_known_runtime_log(lang, content.as_str())
     {
         translated
@@ -2014,6 +2056,10 @@ fn lpm_translate_owned(content: String) -> String {
         translated.to_string()
     } else if let Some(translated) = lpm_translate_exact(lang, content.as_str()) {
         translated.to_string()
+    } else if let Some(translated) =
+        lpmbox_core::language_catalog::translate_legacy(lang.code(), content.as_str())
+    {
+        translated
     } else {
         let translated = lpm_translate_stage8_phrasewise(lang, content.clone());
         let translated = lpm_translate_stage7_phrasewise(lang, translated);
@@ -2584,6 +2630,50 @@ fn lpm_equal_button_width(labels: &[&str], min_width: f32, max_width: f32) -> f3
         }
     }
     widest.clamp(min_width, max_width)
+}
+
+fn lpm_advanced_two_columns(window_width: f32) -> bool {
+    window_width >= 1080.0 && window_width - SIDEBAR_EXPANDED_WIDTH >= 840.0
+}
+
+const ROM_FOLDER_LEFT_CARD_WIDTH: f32 = 378.0;
+const ROM_FOLDER_RIGHT_COLUMN_WIDTH: f32 = 275.0;
+const ROM_FOLDER_CARDS_GAP: f32 = 12.0;
+
+fn lpm_firmware_summary_two_columns(window_width: f32, sidebar_width: f32) -> bool {
+    let body_width = window_width - sidebar_width - 40.0 - 28.0;
+    body_width >= ROM_FOLDER_LEFT_CARD_WIDTH + ROM_FOLDER_RIGHT_COLUMN_WIDTH + ROM_FOLDER_CARDS_GAP
+}
+
+// The ROM folder picker and its firmware-check card have shrink-sized
+// contents. Putting those inside a Scrollable removed their vertical centering
+// because the scroll child has unconstrained height. Scroll only when the
+// completed firmware summary genuinely needs more room.
+fn lpm_rom_panel_can_center(
+    has_firmware_info: bool,
+    has_firmware_error: bool,
+    window_width: f32,
+    window_height: f32,
+    sidebar_width: f32,
+) -> bool {
+    if !has_firmware_info {
+        return true;
+    }
+    !has_firmware_error
+        && window_height >= 720.0
+        && lpm_firmware_summary_two_columns(window_width, sidebar_width)
+}
+
+fn lpm_rom_card_width(window_width: f32, sidebar_width: f32) -> f32 {
+    (window_width - sidebar_width - 64.0).clamp(350.0, ROM_ROUTINE_CARD_WIDTH)
+}
+
+fn lpm_rom_card_height(lang: LanguageOption) -> f32 {
+    match lang {
+        LanguageOption::Korean | LanguageOption::English |
+        LanguageOption::Japanese | LanguageOption::TraditionalChinese => 112.0,
+        _ => 148.0,
+    }
 }
 
 fn lpm_routine_title_size() -> u32 {
@@ -3165,6 +3255,8 @@ fn lpm_rom_routine_ui_text(lang: LanguageOption, key: &'static str) -> &'static 
         "기기에 설치된 버전보다 낮을 경우/초기화 O." => lpm_lang_text(lang, "If lower than the installed version: wipe required.", "Если ниже установленной версии: требуется сброс.", "インストール済みより低い場合：初期化あり。", "低於已安裝版本時：需要清除資料。", "Nếu thấp hơn phiên bản đã cài: cần xóa dữ liệu.", "Αν είναι χαμηλότερη από την εγκατεστημένη έκδοση: απαιτείται διαγραφή.", "इंस्टॉल संस्करण से कम होने पर: वाइप आवश्यक।", "თუ დაყენებულ ვერსიაზე დაბალია: საჭიროა წაშლა.", "Als lager dan geïnstalleerd: wissen vereist.", "إذا كان أقل من الإصدار المثبت: يلزم المسح.", "Si es inferior a la versión instalada: requiere borrado."),
         "기기에 설치된 버전보다 높은 경우/초기화 X." => lpm_lang_text(lang, "If higher than the installed version: no wipe.", "Если выше установленной версии: сброс не нужен.", "インストール済みより高い場合：初期化なし。", "高於已安裝版本時：不清除資料。", "Nếu cao hơn phiên bản đã cài: không xóa dữ liệu.", "Αν είναι υψηλότερη από την εγκατεστημένη έκδοση: χωρίς διαγραφή.", "इंस्टॉल संस्करण से अधिक होने पर: वाइप नहीं।", "თუ დაყენებულ ვერსიაზე მაღალია: წაშლა არ არის საჭირო.", "Als hoger dan geïnstalleerd: niet wissen.", "إذا كان أعلى من الإصدار المثبت: لا يلزم المسح.", "Si es superior a la versión instalada: sin borrado."),
         "'펌웨어 설치 실패' 등 기기를 복구합니다." => lpm_lang_text(lang, "Recover from issues such as firmware installation failure.", "Восстановление после ошибок, например сбоя установки прошивки.", "ファームウェア導入失敗などから復旧します。", "修復韌體安裝失敗等問題。", "Khôi phục các lỗi như cài firmware thất bại.", "Ανάκτηση από προβλήματα όπως αποτυχία εγκατάστασης firmware.", "firmware इंस्टॉल विफलता जैसी समस्याओं से रिकवर करें।", "აღდგენა firmware-ის დაყენების შეცდომის მსგავსი პრობლემებისგან.", "Herstel van problemen zoals firmware-installatiefouten.", "الاسترداد من مشكلات مثل فشل تثبيت firmware.", "Recupera fallos como errores al instalar firmware."),
+        "'The current system is not compatible'," => lpm_lang_text(lang, "Incompatible system image.", "Несовместимый образ системы.", "システムイメージが互換性なし。", "系統映像檔不相容。", "Ảnh hệ thống không tương thích.", "Μη συμβατό είδωλο συστήματος.", "सिस्टम इमेज संगत नहीं है।", "სისტემის იმიჯი შეუთავსებელია.", "Incompatibele systeemimage.", "صورة النظام غير متوافقة.", "Imagen del sistema incompatible."),
+        "'Red state that restarts every 5 seconds'," => lpm_lang_text(lang, "Red state: reboot every 5 seconds.", "Red State: перезагрузка каждые 5 секунд.", "Red State：5秒ごとに再起動。", "Red State：每 5 秒重新啟動。", "Red State: khởi động lại mỗi 5 giây.", "Red State: επανεκκίνηση κάθε 5 δευτερόλεπτα.", "Red State: हर 5 सेकंड में पुनः चालू।", "Red State: გადატვირთვა ყოველ 5 წამში.", "Red State: herstart elke 5 seconden.", "حالة Red State: إعادة تشغيل كل 5 ثوانٍ.", "Red State: reinicio cada 5 segundos."),
         _ => lpm_translate_exact_stage10(lang, key).unwrap_or(key),
     }
 }
@@ -3996,6 +4088,28 @@ const ROM_BOTTOM_BUTTON_FONT: u32 = 12;
 
 const LPMBOX_MIN_BATTERY_LEVEL: u8 = 20;
 
+fn resolve_image_folder_selection(selected: &Path) -> Result<PathBuf, &'static str> {
+    if !selected.is_dir() {
+        return Err("선택한 경로에 image 폴더가 없습니다. image 폴더 또는 그 상위 폴더를 선택해주세요.");
+    }
+    // Firmware directory can be selected directly, via its immediate parent,
+    // or via any existing nested directory (e.g. image/download_agent).
+    // Only an explicitly named "image" ancestor is accepted; we never pick
+    // arbitrary sibling firmware directories or guess a different ROM.
+    for candidate in selected.ancestors() {
+        if candidate.file_name().is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("image"))
+            && candidate.is_dir()
+        {
+            return Ok(candidate.to_path_buf());
+        }
+    }
+    let nested = selected.join("image");
+    if nested.is_dir() {
+        return Ok(nested);
+    }
+    Err("선택한 경로에 image 폴더가 없습니다. image 폴더 또는 그 상위 폴더를 선택해주세요.")
+}
+
 fn main() -> iced::Result {
     #[cfg(target_os = "windows")]
     {
@@ -4011,12 +4125,14 @@ fn main() -> iced::Result {
 
     iced::application(App::new, App::update, App::view)
         .subscription(App::subscription)
+        .theme(App::theme)
         .title("LPMBox")
         .font(INTER_FONT_BYTES)
         .default_font(lpm_font())
         .window(window::Settings {
             size: Size::new(WINDOW_WIDTH, WINDOW_HEIGHT),
-            resizable: false,
+            resizable: true,
+            min_size: Some(Size::new(820.0, 720.0)),
             icon: lpm_window_icon(),
             ..window::Settings::default()
         })
@@ -4142,6 +4258,7 @@ struct App {
     sidebar_expanded: bool,
     sidebar_anim: f32,
     sidebar_velocity: f32,
+    window_size: (f32, f32),
 
     dashboard_info: lpmbox_device::DashboardDeviceInfo,
     dashboard_refreshing: bool,
@@ -4155,6 +4272,12 @@ struct App {
     rom_option_data_wipe_locked: bool,
     rom_option_country_code: Option<String>,
     rom_country_popup_open: bool,
+    rom_country_draft: Option<String>,
+    rom_country_skip_draft: bool,
+    startup_disclaimer_open: bool,
+    startup_disclaimer_checked: bool,
+    external_adb_kill_in_flight: bool,
+    external_adb_server_active: bool,
 
     dashboard_model_image: DashboardModelImage,
     dashboard_model_missing_since: Option<Instant>,
@@ -4162,22 +4285,34 @@ struct App {
     model_tb365_handle: iced::widget::image::Handle,
     model_tb335_handle: iced::widget::image::Handle,
     rom_install_icon_handle: iced::widget::image::Handle,
+    rom_install_icon_dark_handle: iced::widget::image::Handle,
     rom_update_icon_handle: iced::widget::image::Handle,
+    rom_update_icon_dark_handle: iced::widget::image::Handle,
     folder_select_icon_handle: iced::widget::image::Handle,
+    folder_select_icon_dark_handle: iced::widget::image::Handle,
     folder_check_icon_handle: iced::widget::image::Handle,
+    folder_check_icon_dark_handle: iced::widget::image::Handle,
     tablet_check_icon_handle: iced::widget::image::Handle,
+    tablet_check_icon_dark_handle: iced::widget::image::Handle,
     tablet_x_icon_handle: iced::widget::image::Handle,
+    tablet_x_icon_dark_handle: iced::widget::image::Handle,
     tablet_fix_icon_handle: iced::widget::image::Handle,
+    tablet_fix_icon_dark_handle: iced::widget::image::Handle,
     slide_button_handle: iced::widget::image::Handle,
     warning_icon_handle: iced::widget::image::Handle,
     nav_home_handle: iced::widget::image::Handle,
     nav_refresh_handle: iced::widget::image::Handle,
     nav_tab_settings_handle: iced::widget::image::Handle,
+    nav_root_handle: iced::widget::image::Handle,
+    nav_unroot_handle: iced::widget::image::Handle,
+    nav_about_handle: iced::widget::image::Handle,
     nav_firmware_download_handle: iced::widget::image::Handle,
     nav_qna_handle: iced::widget::image::Handle,
     nav_log_handle: iced::widget::image::Handle,
     nav_settings_handle: iced::widget::image::Handle,
+    nav_dark_handles: Vec<(NavPage, iced::widget::image::Handle)>,
     loading_progress_handles: Vec<iced::widget::image::Handle>,
+    loading_progress_dark_handles: Vec<iced::widget::image::Handle>,
     rom_install_hover_since: Option<Instant>,
     rom_update_hover_since: Option<Instant>,
     rom_reinstall_hover_since: Option<Instant>,
@@ -4192,8 +4327,24 @@ struct App {
     rom_selected_country_code: Option<&'static str>,
     rom_country_code_search: String,
     additional_country_reset_pending: bool,
+    partition_wizard: Option<PartitionWizard>,
+    partition_name: String,
+    partition_flash_image: Option<PathBuf>,
+    partition_flash_confirm: bool,
+    partition_tool_status: String,
     settings_language: LanguageOption,
+    appearance: Appearance,
+    system_dark: bool,
+    license_dialog_open: bool,
+    log_cleanup_confirmation_open: bool,
+    cache_cleanup_confirmation_open: bool,
     active_log_flow: Option<RuntimeFlowKind>,
+    // GBST-style execution UI, driven only by observed worker milestones.
+    runtime_last_flow: Option<RuntimeFlowKind>,
+    runtime_started_at: Option<Instant>,
+    runtime_finished_elapsed: Option<Duration>,
+    runtime_log_start_index: usize,
+    runtime_last_outcome: Option<bool>,
     program_update_checking: bool,
     dashboard_update_notice: Option<ProgramUpdateCheckResult>,
 }
@@ -4247,10 +4398,13 @@ enum NavPage {
     Rom,
     Backup,
     Driver,
+    Root,
+    Unroot,
     FirmwareDownload,
     Qna,
     Log,
     Settings,
+    About,
 }
 
 
@@ -6004,6 +6158,7 @@ enum Message {
     InstallMtkDriver,
     InstallVcRuntime,
     DrainLiveEvents,
+    FollowWorkHistory,
     ExportLog,
     ClearLog,
 
@@ -6011,6 +6166,7 @@ enum Message {
     SidebarHoverEnter,
     SidebarHoverExit,
     SidebarAnimTick,
+    WindowResized(f32, f32),
 
     RomCardHoverEnter(RomSlideTarget),
     RomCardHoverExit(RomSlideTarget),
@@ -6030,6 +6186,20 @@ enum Message {
     RomSelectCountryCode(&'static str),
     RomCountryCodeSearchChanged(String),
     AdditionalOpenCountryReset,
+    PartitionWizard(PartitionWizardMsg),
+    PartitionNameChanged(String),
+    PartitionDumpRequested,
+    PartitionFlashChooseImage,
+    PartitionFlashRequested,
+    PartitionToolFinished(Result<String,String>),
+    RomCountryStage(String),
+    RomCountrySkip,
+    RomCountryConfirm,
+    DisclaimerToggled(bool),
+    DisclaimerConfirm,
+    DisclaimerExit,
+    KillExternalAdbServer,
+    ExternalAdbKillFinished(Result<(), String>),
     StartOtaDisable,
     StartOtaEnable,
     DashboardOpenRomFolderSelect,
@@ -6039,14 +6209,31 @@ enum Message {
     OpenProgramVideos,
     OpenDonate,
     OpenFeedback,
+    OpenDownloadsFolder,
+    OpenLogFolder,
+    OpenSourceRepository,
+    OpenLTBoxRepository,
     CheckProgramUpdate,
     ProgramUpdateChecked(Result<ProgramUpdateCheckResult, String>),
     DashboardProgramUpdateChecked(Result<ProgramUpdateCheckResult, String>),
     OpenProgramUpdateRelease,
     DismissProgramUpdateNotice,
     SettingsLanguageSelected(LanguageOption),
+    SettingsThemeSelected(ThemeChoice),
+    SettingsAccentSelected(AccentChoice),
+    OpenLicenseDialog,
+    CloseLicenseDialog,
+    RequestSavedLogCleanup,
+    CancelSavedLogCleanup,
+    ConfirmSavedLogCleanup,
+    RequestCacheCleanup,
+    CancelCacheCleanup,
+    ConfirmCacheCleanup,
     WindowCloseRequested,
 }
+
+// Experimental controls are intentionally disabled for the current UI.
+const LPM_EXPERIMENTAL_UI_ENABLED: bool = false;
 
 const LPM_NAV_MAIN: &[(NavPage, &'static [u8], &str)] = &[
     (NavPage::Dashboard, NAV_HOME_ICON_BYTES, "대시보드"),
@@ -6055,11 +6242,7 @@ const LPM_NAV_MAIN: &[(NavPage, &'static [u8], &str)] = &[
 ];
 
 const LPM_NAV_TOOLS: &[(NavPage, &'static [u8], &str)] = &[
-    (
-        NavPage::FirmwareDownload,
-        NAV_FIRMWARE_DOWNLOAD_ICON_BYTES,
-        "펌웨어 다운로드",
-    ),
+    // FirmwareDownload remains implemented internally but is not in the sidebar.
     (NavPage::Qna, NAV_QNA_ICON_BYTES, "QnA"),
     (NavPage::Log, NAV_LOG_ICON_BYTES, "로그 관리"),
     (NavPage::Settings, NAV_SETTINGS_ICON_BYTES, "설정"),
@@ -6081,11 +6264,12 @@ fn lpm_nav_button<'a>(
     .height(Length::Fixed(28.0))
     .align_x(iced::alignment::Horizontal::Center)
     .align_y(iced::alignment::Vertical::Center)
-    .style(move |_theme: &Theme| {
+    .style(move |theme: &Theme| {
         if active {
+            let c = lpm_shell_palette(theme);
             container::Style {
-                background: Some(Background::Color(Color::from_rgb8(224, 228, 255))),
-                text_color: Some(Color::from_rgb8(43, 58, 118)),
+                background: Some(Background::Color(c.subtle)),
+                text_color: Some(c.accent),
                 border: iced::Border {
                     radius: 14.0.into(),
                     ..iced::Border::default()
@@ -6111,9 +6295,12 @@ fn lpm_nav_button<'a>(
                 .height(Length::Fill)
                 .align_y(iced::alignment::Vertical::Center)
                 .wrapping(iced::widget::text::Wrapping::Word)
-                .style(move |_theme: &Theme| iced::widget::text::Style {
-                    color: Some(Color::from_rgba(32.0 / 255.0, 35.0 / 255.0, 47.0 / 255.0, alpha)),
-                }),
+                .style(move |theme: &Theme| {
+                let c = lpm_shell_palette(theme);
+                iced::widget::text::Style {
+                    color: Some(Color { a: alpha, ..c.text }),
+                }
+            }),
         );
     }
 
@@ -6127,16 +6314,12 @@ fn lpm_nav_button<'a>(
         .width(Length::Fill)
         .height(Length::Fixed(NAV_BTN_HEIGHT))
         .on_press(Message::SelectNav(page))
-        .style(move |_theme: &Theme, status| {
+        .style(move |theme: &Theme, status| {
             let hovered = matches!(status, iced::widget::button::Status::Hovered);
-
+            let c = lpm_shell_palette(theme);
             iced::widget::button::Style {
-                background: if hovered {
-                    Some(Background::Color(Color::from_rgb8(233, 235, 246)))
-                } else {
-                    None
-                },
-                text_color: Color::from_rgb8(32, 35, 47),
+                background: if hovered { Some(Background::Color(c.subtle)) } else { None },
+                text_color: c.text,
                 border: iced::Border {
                     radius: 18.0.into(),
                     ..iced::Border::default()
@@ -6203,11 +6386,14 @@ fn nav_page_title(page: NavPage) -> &'static str {
         NavPage::Dashboard => "대시보드",
         NavPage::Rom => "image 폴더 선택",
         NavPage::Backup => "proinfo 백업",
-        NavPage::Driver => "기기 관리",
+        NavPage::Driver => "추가 옵션",
+        NavPage::Root => "루팅",
+        NavPage::Unroot => "언루팅",
         NavPage::FirmwareDownload => "펌웨어 다운로드",
         NavPage::Qna => "QnA",
         NavPage::Log => "로그 관리",
         NavPage::Settings => "설정",
+        NavPage::About => "정보",
     }
 }
 
@@ -6217,14 +6403,30 @@ fn nav_page_subtitle(page: NavPage) -> &'static str {
         NavPage::Rom => "image 폴더를 선택해주세요.",
         NavPage::Backup => "proinfo 파티션을 백업합니다.",
         NavPage::Driver => "기기를 추가적으로 설정합니다.",
+        NavPage::Root => "이 기기에 검증된 루팅 방법이 있는지 확인합니다.",
+        NavPage::Unroot => "루팅 제거를 위한 지원 상태를 확인합니다.",
         NavPage::FirmwareDownload => "샤오신패드 펌웨어 다운로드 페이지로 이동합니다.",
         NavPage::Qna => "LPMBOX QnA 페이지로 이동합니다.",
         NavPage::Log => "작업 로그를 확인하고 텍스트 파일로 저장합니다.",
         NavPage::Settings => "LPMBOX 프로그램을 설정합니다.",
+        NavPage::About => "프로젝트 및 라이선스 정보를 확인합니다.",
     }
 }
 
 impl App {
+    fn theme(&self) -> Theme {
+        self.appearance.as_theme(self.system_dark)
+    }
+
+    fn uses_dark_icon_palette(&self) -> bool {
+        let background = self.theme().palette().background;
+        background.r + background.g + background.b < 1.55
+    }
+
+    fn catalog(&self, key: &str) -> String {
+        lpmbox_core::language_catalog::translate(self.settings_language.code(), key)
+    }
+
     fn new() -> (Self, Task<Message>) {
         let (initial_language, initial_language_source) = initial_language_option_with_source();
         set_active_language_option(initial_language);
@@ -6256,6 +6458,7 @@ impl App {
         sidebar_expanded: false,
         sidebar_anim: 0.0,
         sidebar_velocity: 0.0,
+        window_size: (WINDOW_WIDTH, WINDOW_HEIGHT),
 
         dashboard_info: lpmbox_device::DashboardDeviceInfo::default(),
         dashboard_refreshing: false,
@@ -6269,6 +6472,12 @@ impl App {
         rom_option_data_wipe_locked: true,
         rom_option_country_code: None,
         rom_country_popup_open: false,
+        rom_country_draft: None,
+        rom_country_skip_draft: false,
+        startup_disclaimer_open: true,
+        startup_disclaimer_checked: false,
+        external_adb_kill_in_flight: false,
+        external_adb_server_active: lpmbox_device::adb_server_running(),
 
         dashboard_model_image: DashboardModelImage::Unknown,
         dashboard_model_missing_since: None,
@@ -6276,22 +6485,46 @@ impl App {
         model_tb365_handle: iced::widget::image::Handle::from_bytes(MODEL_TB365FC_IMAGE_BYTES.to_vec()),
         model_tb335_handle: iced::widget::image::Handle::from_bytes(MODEL_TB335FC_IMAGE_BYTES.to_vec()),
         rom_install_icon_handle: smooth_png_handle(ROM_INSTALL_ICON_BYTES, 150, 150),
+        rom_install_icon_dark_handle: dark_outline_png_handle(ROM_INSTALL_ICON_BYTES, 150, 150),
         rom_update_icon_handle: smooth_png_handle(ROM_UPDATE_ICON_BYTES, 150, 150),
+        rom_update_icon_dark_handle: dark_outline_png_handle(ROM_UPDATE_ICON_BYTES, 150, 150),
         folder_select_icon_handle: smooth_png_handle(FOLDER_SELECT_ICON_BYTES, 96, 96),
+        folder_select_icon_dark_handle: dark_outline_png_handle(FOLDER_SELECT_ICON_BYTES, 96, 96),
         folder_check_icon_handle: smooth_png_handle(FOLDER_CHECK_ICON_BYTES, 96, 96),
+        folder_check_icon_dark_handle: dark_outline_png_handle(FOLDER_CHECK_ICON_BYTES, 96, 96),
         tablet_check_icon_handle: smooth_png_handle(TABLET_CHECK_ICON_BYTES, 92, 92),
+        tablet_check_icon_dark_handle: dark_outline_png_handle(TABLET_CHECK_ICON_BYTES, 92, 92),
         tablet_x_icon_handle: smooth_png_handle(TABLET_X_ICON_BYTES, 92, 92),
+        tablet_x_icon_dark_handle: dark_outline_png_handle(TABLET_X_ICON_BYTES, 92, 92),
         tablet_fix_icon_handle: smooth_png_handle(TABLET_FIX_ICON_BYTES, 92, 92),
+        tablet_fix_icon_dark_handle: dark_outline_png_handle(TABLET_FIX_ICON_BYTES, 92, 92),
         slide_button_handle: iced::widget::image::Handle::from_bytes(SLIDE_BUTTON_BYTES.to_vec()),
         warning_icon_handle: smooth_png_handle(WARNING_ICON_BYTES, 96, 96),
         nav_home_handle: smooth_png_handle(NAV_HOME_ICON_BYTES, 21, 21),
         nav_refresh_handle: smooth_png_handle(NAV_REFRESH_ICON_BYTES, 21, 21),
         nav_tab_settings_handle: smooth_png_handle(NAV_TAB_SETTINGS_ICON_BYTES, 21, 21),
+        nav_root_handle: smooth_png_handle(NAV_LTBOX_ROOT_ICON_BYTES, 21, 21),
+        nav_unroot_handle: smooth_png_handle(NAV_LTBOX_UNROOT_ICON_BYTES, 21, 21),
+        nav_about_handle: smooth_png_handle(NAV_LTBOX_INFO_ICON_BYTES, 21, 21),
         nav_firmware_download_handle: smooth_png_handle(NAV_FIRMWARE_DOWNLOAD_ICON_BYTES, 21, 21),
         nav_qna_handle: smooth_png_handle(NAV_QNA_ICON_BYTES, 21, 21),
         nav_log_handle: smooth_png_handle(NAV_LOG_ICON_BYTES, 21, 21),
         nav_settings_handle: smooth_png_handle(NAV_SETTINGS_ICON_BYTES, 21, 21),
-        loading_progress_handles: build_loading_progress_handles(),
+        nav_dark_handles: vec![
+            (NavPage::Dashboard, light_nav_png_handle(NAV_HOME_ICON_BYTES,21,21)),
+            (NavPage::Rom, light_nav_png_handle(NAV_REFRESH_ICON_BYTES,21,21)),
+            (NavPage::Driver, light_nav_png_handle(NAV_TAB_SETTINGS_ICON_BYTES,21,21)),
+            (NavPage::Root, light_nav_png_handle(NAV_LTBOX_ROOT_ICON_BYTES,21,21)),
+            (NavPage::Unroot, light_nav_png_handle(NAV_LTBOX_UNROOT_ICON_BYTES,21,21)),
+            (NavPage::FirmwareDownload, light_nav_png_handle(NAV_FIRMWARE_DOWNLOAD_ICON_BYTES,21,21)),
+            (NavPage::Backup, dark_nav_png_handle_with_white_knockout(NAV_LOG_ICON_BYTES,21,21)),
+            (NavPage::Qna, light_nav_png_handle(NAV_QNA_ICON_BYTES,21,21)),
+            (NavPage::Log, dark_nav_png_handle_with_white_knockout(NAV_LOG_ICON_BYTES,21,21)),
+            (NavPage::Settings, light_nav_png_handle(NAV_SETTINGS_ICON_BYTES,21,21)),
+            (NavPage::About, light_nav_png_handle(NAV_LTBOX_INFO_ICON_BYTES,21,21)),
+        ],
+        loading_progress_handles: build_loading_progress_handles(false),
+        loading_progress_dark_handles: build_loading_progress_handles(true),
 
         rom_install_hover_since: None,
         rom_update_hover_since: None,
@@ -6306,8 +6539,23 @@ impl App {
         rom_selected_country_code: None,
         rom_country_code_search: String::new(),
         additional_country_reset_pending: false,
+        partition_wizard: None,
+        partition_name: "boot_a".into(),
+        partition_flash_image: None,
+        partition_flash_confirm: false,
+        partition_tool_status: "대기 중".into(),
         settings_language: initial_language,
+        appearance: Appearance::load(),
+        system_dark: system_prefers_dark(),
+        license_dialog_open: false,
+        log_cleanup_confirmation_open: false,
+        cache_cleanup_confirmation_open: false,
         active_log_flow: None,
+        runtime_last_flow: None,
+        runtime_started_at: None,
+        runtime_finished_elapsed: None,
+        runtime_log_start_index: 0,
+        runtime_last_outcome: None,
         program_update_checking: false,
         dashboard_update_notice: None,
     };
@@ -6330,6 +6578,21 @@ impl App {
             ),
         )
     }
+
+// Re-probe port 5037 immediately before any ROM worker is launched.
+ // Dashboard state is cached and may be stale after another app opens ADB.
+ // This check only reads the local port and never stops a third-party process.
+fn rom_external_adb_conflict(&mut self) -> bool {
+    self.record_rom_external_adb_status(lpmbox_device::adb_server_running())
+}
+
+fn record_rom_external_adb_status(&mut self, server_active: bool) -> bool {
+    self.external_adb_server_active = server_active;
+    if server_active {
+        self.push_log(self.catalog("lpm.adb.rom_blocked"));
+    }
+    server_active
+}
 
 fn animate_rom_slide_width(current: f32, velocity: &mut f32, target: f32) -> f32 {
     *velocity = 0.0;
@@ -6418,10 +6681,9 @@ fn reset_rom_check_loading_stack(&mut self) {
 fn subscription(&self) -> Subscription<Message> {
     let mut subscriptions = Vec::new();
 
-    if matches!(self.active_nav, NavPage::Dashboard | NavPage::Rom)
-        && !self.busy
-        && !self.ui_animation_active()
-    {
+    // Direct USB ADB polling must remain live on all idle navigation pages,
+    // including image picker, ROM folder info, settings and logs.
+    if !self.busy && !self.ui_animation_active() {
         subscriptions.push(
             iced::time::every(DASHBOARD_REFRESH_INTERVAL)
                 .map(|_| Message::DashboardRefreshTick),
@@ -6449,10 +6711,25 @@ fn subscription(&self) -> Subscription<Message> {
         );
     }
 
+    if self.partition_wizard.as_ref().is_some_and(|w|w.running) {
+        subscriptions.push(
+            iced::time::every(Duration::from_millis(160))
+                .map(|_| Message::PartitionWizard(PartitionWizardMsg::Tick)),
+        );
+    }
     if self.live_rx.is_some() {
         subscriptions.push(
             iced::time::every(LIVE_EVENT_DRAIN_INTERVAL).map(|_| Message::DrainLiveEvents),
         );
+        // A running ROM worker can overwrite a progress row instead of
+        // appending a new row. Keep the work-history scroll at the very bottom
+        // while its log is visible, even when log_lines.len() is unchanged.
+        if matches!(self.active_nav, NavPage::Log | NavPage::Rom) {
+            subscriptions.push(
+                iced::time::every(Duration::from_millis(160))
+                    .map(|_| Message::FollowWorkHistory),
+            );
+        }
     }
 
     if !self.sidebar_anim_settled() {
@@ -6470,10 +6747,12 @@ fn subscription(&self) -> Subscription<Message> {
     }
 
     subscriptions.push(iced::event::listen_with(|event, _, _| {
-        if let iced::Event::Window(iced::window::Event::CloseRequested) = event {
-            Some(Message::WindowCloseRequested)
-        } else {
-            None
+        match event {
+            iced::Event::Window(iced::window::Event::CloseRequested) =>
+                Some(Message::WindowCloseRequested),
+            iced::Event::Window(iced::window::Event::Resized(size)) =>
+                Some(Message::WindowResized(size.width, size.height)),
+            _ => None,
         }
     }));
 
@@ -6483,12 +6762,56 @@ fn subscription(&self) -> Subscription<Message> {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
 Message::Noop => Task::none(),
+Message::FollowWorkHistory => {
+    if self.live_rx.is_some()
+        && matches!(self.active_nav, NavPage::Log | NavPage::Rom)
+    {
+        iced::widget::operation::snap_to_end(
+            iced::widget::Id::new("lpmbox-rom-work-history")
+        )
+    } else {
+        Task::none()
+    }
+}
+Message::PartitionWizard(msg) => self.update_partition_wizard(msg),
+Message::DisclaimerToggled(value) => {
+    self.startup_disclaimer_checked = value;
+    Task::none()
+}
+Message::DisclaimerConfirm => {
+    if self.startup_disclaimer_checked {
+        self.startup_disclaimer_open = false;
+        self.push_log("[정보] 면책 조항을 확인하고 계속 진행했습니다.");
+    }
+    Task::none()
+}
+Message::DisclaimerExit => {
+    self.cleanup_before_process_exit();
+    std::process::exit(0)
+}
+Message::KillExternalAdbServer => {
+    if self.busy || self.external_adb_kill_in_flight { return Task::none(); }
+    if !self.external_adb_server_active { return Task::none(); }
+    self.external_adb_kill_in_flight = true;
+    self.push_log("[ADB] 외부 ADB 서버 종료를 요청했습니다.");
+    Task::perform(async {
+        tokio::task::spawn_blocking(|| {
+            lpmbox_device::kill_adb_server_direct().map_err(|e| e.to_string())
+        }).await.unwrap_or_else(|e| Err(format!("ADB 종료 작업 오류: {e}")))
+    }, Message::ExternalAdbKillFinished)
+}
+Message::ExternalAdbKillFinished(result) => {
+    self.external_adb_kill_in_flight = false;
+    self.external_adb_server_active = lpmbox_device::adb_server_running();
+    match result {
+        Ok(()) => self.push_log("[ADB] 외부 ADB 서버 종료가 완료되었습니다."),
+        Err(error) => self.push_log(format!("[ADB] 외부 ADB 서버 종료 실패: {error}")),
+    }
+    self.update(Message::DashboardRefreshTick)
+}
 
 Message::DashboardRefreshTick => {
-    if !matches!(self.active_nav, NavPage::Dashboard | NavPage::Rom)
-        || self.busy
-        || self.dashboard_refreshing
-    {
+    if self.busy || self.dashboard_refreshing {
         return Task::none();
     }
 
@@ -6499,6 +6822,7 @@ Message::DashboardRefreshTick => {
 
 Message::DashboardLoaded(result) => {
     self.dashboard_refreshing = false;
+    self.external_adb_server_active = lpmbox_device::adb_server_running();
 
     let was_device_unknown = lpm_is_unknown_text(&self.dashboard_info.product_device);
 
@@ -6526,7 +6850,7 @@ Message::DashboardLoaded(result) => {
         }
 
         Err(_err) => {
-            if matches!(self.active_nav, NavPage::Dashboard | NavPage::Rom) {
+            {
                 self.dashboard_info = lpmbox_device::DashboardDeviceInfo::default();
 
                 if self.battery_progress_level != None {
@@ -6688,6 +7012,8 @@ Message::RomOpenCountryCodeModal => {
 
     self.rom_country_popup_open = true;
     self.rom_country_code_modal_open = true;
+    self.rom_country_draft = self.rom_option_country_code.clone();
+    self.rom_country_skip_draft = self.rom_country_draft.is_none();
     self.rom_country_code_search.clear();
     Task::none()
 }
@@ -6703,10 +7029,43 @@ Message::RomCountrySelect => {
     }
 
     self.rom_country_popup_open = true;
+    self.rom_country_draft = self.rom_option_country_code.clone();
+    self.rom_country_skip_draft = self.rom_country_draft.is_none();
     self.rom_country_code_search.clear();
     Task::none()
 }
 
+Message::RomCountryStage(code) => {
+    if !ROM_COUNTRY_CODES.iter().any(|entry| entry.code == code) { return Task::none(); }
+    self.rom_country_draft = Some(code);
+    self.rom_country_skip_draft = false;
+    Task::none()
+}
+Message::RomCountrySkip => {
+    if self.additional_country_reset_pending { return Task::none(); }
+    self.rom_country_draft = None;
+    self.rom_country_skip_draft = true;
+    Task::none()
+}
+Message::RomCountryConfirm => {
+    if self.busy || !self.rom_country_popup_open { return Task::none(); }
+    if self.rom_country_skip_draft && !self.additional_country_reset_pending {
+        self.rom_option_country_code = None;
+        self.rom_country_popup_open = false;
+        self.rom_country_code_modal_open = false;
+        self.rom_country_code_search.clear();
+        self.rom_country_draft = None;
+        self.rom_country_skip_draft = false;
+        self.push_log("[ROM 옵션] 국가 코드를 변경하지 않습니다.");
+        return Task::none();
+    }
+    if let Some(code) = self.rom_country_draft.clone() {
+        if ROM_COUNTRY_CODES.iter().any(|entry| entry.code == code) {
+            return self.update(Message::RomSelectCountry(code));
+        }
+    }
+    Task::none()
+}
 Message::RomSelectCountry(code) => {
     if self.busy {
         self.push_log("이미 작업이 진행 중입니다.");
@@ -6720,6 +7079,8 @@ Message::RomSelectCountry(code) => {
     let start_additional_country_reset = self.additional_country_reset_pending;
 
     self.rom_option_country_code = Some(code.clone());
+    self.rom_country_draft = None;
+    self.rom_country_skip_draft = false;
     self.rom_country_popup_open = false;
     self.rom_country_code_modal_open = false;
     self.rom_country_code_search.clear();
@@ -6736,6 +7097,8 @@ Message::RomSelectCountry(code) => {
 
 Message::RomCloseCountryPopup => {
     self.rom_country_popup_open = false;
+    self.rom_country_draft = None;
+    self.rom_country_skip_draft = false;
     self.rom_country_code_search.clear();
     self.additional_country_reset_pending = false;
     Task::none()
@@ -6787,6 +7150,9 @@ Message::RomContinueFromOptions => {
         self.push_log("이미 작업이 진행 중입니다.");
         return Task::none();
     }
+    if self.rom_external_adb_conflict() {
+        return Task::none();
+    }
 
     self.active_nav = NavPage::Log;
 
@@ -6833,7 +7199,56 @@ Message::RomSlideTick => {
     Task::none()
 }
 
+Message::OpenDownloadsFolder => {
+    let path = lpmbox_core::app_paths::tool_download_dir();
+    match std::fs::create_dir_all(&path).and_then(|_| open::that(&path).map_err(std::io::Error::other)) {
+        Ok(_) => {},
+        Err(err) => self.push_log(format!("[Settings] Unable to open download folder: {err}")),
+    }
+    Task::none()
+}
+Message::OpenLogFolder => {
+    let path = lpmbox_core::app_paths::log_dir();
+    match std::fs::create_dir_all(&path).and_then(|_| open::that(&path).map_err(std::io::Error::other)) {
+        Ok(_) => {},
+        Err(err) => self.push_log(format!("[Settings] Unable to open logs folder: {err}")),
+    }
+    Task::none()
+}
+Message::OpenSourceRepository => {
+    if let Err(err) = open::that("https://github.com/dwas-KR/LPMBox") {
+        self.push_log(format!("[Link] Unable to open LPMBox source: {err}"));
+    }
+    Task::none()
+}
+Message::OpenLTBoxRepository => {
+    if let Err(err) = open::that("https://github.com/jjhitel/LTBox") {
+        self.push_log(format!("[Link] Unable to open LTBox reference: {err}"));
+    }
+    Task::none()
+}
 Message::SelectNav(page) => {
+    if !LPM_EXPERIMENTAL_UI_ENABLED
+        && matches!(page,NavPage::Root | NavPage::Unroot) {
+        return Task::none();
+    }
+    // An explicit click on "ROM 작업" begins at its image-folder picker,
+    // even after a previous ROM selection or a completed install. Preserve
+    // ongoing work and keep other ROM operations unchanged.
+    if page==NavPage::Rom && !self.busy {
+        self.partition_wizard=None;
+        self.image_dir=None;
+        self.rom_firmware_info=None;
+        self.rom_firmware_error=None;
+        self.rom_show_routine_select=false;
+        self.rom_option_target=None;
+        self.running_rom_target=None;
+        self.rom_country_popup_open=false;
+        self.rom_country_code_modal_open=false;
+        self.runtime_started_at=None;
+        self.reset_rom_routine_slide_state();
+        self.reset_rom_check_loading_stack();
+    }
     if page == NavPage::FirmwareDownload {
         return self.update(Message::OpenFirmwareDownload);
     }
@@ -6848,6 +7263,111 @@ Message::SelectNav(page) => {
     }
 
     self.active_nav = page;
+    if page==NavPage::Log {
+        return iced::widget::operation::snap_to_end(
+            iced::widget::Id::new("lpmbox-rom-work-history")
+        );
+    }
+    Task::none()
+}
+
+
+Message::PartitionNameChanged(value) => {
+    if !self.busy {
+        self.partition_name = value.trim().to_ascii_lowercase();
+        self.partition_flash_confirm = false;
+    }
+    Task::none()
+}
+
+Message::PartitionFlashChooseImage => {
+    if self.busy { return Task::none(); }
+    if let Some(image) = rfd::FileDialog::new()
+        .set_title("파티션 플래싱 이미지 선택")
+        .add_filter("Partition images", &["img", "bin"])
+        .pick_file()
+    {
+        self.partition_flash_image = Some(image.clone());
+        self.partition_flash_confirm = false;
+        self.partition_tool_status = format!("선택된 이미지: {}",image.display());
+    }
+    Task::none()
+}
+
+Message::PartitionDumpRequested => {
+    if self.busy { return Task::none(); }
+    let Some(image_dir) = self.image_dir.clone() else {
+        self.partition_tool_status = "먼저 ROM 작업에서 image 폴더를 선택해주세요.".into();
+        return Task::none();
+    };
+    let partition = self.partition_name.clone();
+    let Some(folder) = rfd::FileDialog::new()
+        .set_title("파티션 덤프 저장 폴더 선택").pick_folder()
+    else { return Task::none(); };
+    self.busy = true;
+    self.partition_tool_status = format!("파티션 {partition} 읽기 대기: 기기를 종료하고 USB를 재연결하세요.");
+    self.push_log(format!("[파티션 덤프] {partition} → {}",folder.display()));
+    Task::perform(async move {
+        match tokio::task::spawn_blocking(move || -> Result<String,String> {
+            let prearmed=lpmbox_spft::start_partition_dump(&image_dir,&partition,&folder)
+                .map_err(|err|err.to_string())?;
+            let result=prearmed.finish(|_| {}).map_err(|err|err.to_string())?;
+            Ok(format!("파티션 덤프 성공: {} ({} bytes)",
+                result.plan.proinfo_out.display(),result.proinfo_size))
+        }).await {
+            Ok(outcome)=>outcome,
+            Err(err)=>Err(format!("파티션 덤프 작업 실행 실패: {err}")),
+        }
+    },Message::PartitionToolFinished)
+}
+
+Message::PartitionFlashRequested => {
+    if self.busy { return Task::none(); }
+    let Some(image_dir) = self.image_dir.clone() else {
+        self.partition_tool_status = "먼저 ROM 작업에서 image 폴더를 선택해주세요.".into();
+        return Task::none();
+    };
+    let Some(image) = self.partition_flash_image.clone() else {
+        self.partition_tool_status = "플래싱 이미지(.img/.bin)를 먼저 선택해주세요.".into();
+        return Task::none();
+    };
+    if !self.partition_flash_confirm {
+        self.partition_flash_confirm = true;
+        self.partition_tool_status = format!(
+            "재확인: {} 파티션에 {} 파일을 기록합니다. 한번 더 눌러 확정하세요.",
+            self.partition_name,image.display());
+        return Task::none();
+    }
+    let partition = self.partition_name.clone();
+    self.partition_flash_confirm = false;
+    self.busy = true;
+    self.partition_tool_status = format!("파티션 {partition} SPFT 대기 중: 기기를 종료하고 USB를 재연결하세요.");
+    self.push_log(format!("[파티션 플래싱] {partition} ← {}",image.display()));
+    Task::perform(async move {
+        match tokio::task::spawn_blocking(move || -> Result<String,String> {
+            lpmbox_spft::execute_partition_flash_streaming(&image_dir,&partition,&image,|_| {})
+                .map_err(|err|err.to_string())?;
+            Ok(format!("파티션 {partition} 플래싱 명령 종료. 기기의 정상 부팅은 별도로 확인이 필요합니다."))
+        }).await {
+            Ok(outcome)=>outcome,
+            Err(err)=>Err(format!("파티션 플래싱 작업 실행 실패: {err}")),
+        }
+    },Message::PartitionToolFinished)
+}
+
+Message::PartitionToolFinished(result) => {
+    self.busy = false;
+    self.partition_flash_confirm = false;
+    match result {
+        Ok(message) => {
+            self.partition_tool_status = message.clone();
+            self.push_log(format!("[파티션] {message}"));
+        }
+        Err(err) => {
+            self.partition_tool_status = format!("오류: {err}");
+            self.push_log(format!("[파티션] 오류: {err}"));
+        }
+    }
     Task::none()
 }
 
@@ -6861,6 +7381,8 @@ Message::AdditionalOpenCountryReset => {
     self.rom_option_target = None;
     self.rom_option_country_code = None;
     self.rom_selected_country_code = None;
+    self.rom_country_draft = None;
+    self.rom_country_skip_draft = false;
     self.rom_country_popup_open = true;
     self.rom_country_code_modal_open = true;
     self.rom_country_code_search.clear();
@@ -6882,6 +7404,11 @@ Message::StartOtaDisable => {
     self.spinner_tick = 0;
     self.last_spft_stage = None;
     self.active_log_flow = Some(RuntimeFlowKind::OtaDisable);
+    self.runtime_last_flow = Some(RuntimeFlowKind::OtaDisable);
+    self.runtime_started_at = Some(Instant::now());
+    self.runtime_finished_elapsed = None;
+    self.runtime_log_start_index = self.log_lines.len();
+    self.runtime_last_outcome = None;
     self.push_log("[OTA] OTA(업데이트) 비활성화 작업을 시작합니다.");
 
     let (tx, rx) = mpsc::channel::<ProinfoLiveEvent>();
@@ -6907,6 +7434,11 @@ Message::StartOtaEnable => {
     self.spinner_tick = 0;
     self.last_spft_stage = None;
     self.active_log_flow = Some(RuntimeFlowKind::OtaEnable);
+    self.runtime_last_flow = Some(RuntimeFlowKind::OtaEnable);
+    self.runtime_started_at = Some(Instant::now());
+    self.runtime_finished_elapsed = None;
+    self.runtime_log_start_index = self.log_lines.len();
+    self.runtime_last_outcome = None;
     self.push_log("[OTA] OTA(업데이트) 활성화 작업을 시작합니다.");
 
     let (tx, rx) = mpsc::channel::<ProinfoLiveEvent>();
@@ -7093,6 +7625,74 @@ Message::DismissProgramUpdateNotice => {
     Task::none()
 }
 
+Message::SettingsThemeSelected(theme) => {
+    self.appearance.theme = theme;
+    if let Err(err) = self.appearance.save() {
+        self.push_log(format!("[Settings] Unable to save theme: {err}"));
+    }
+    Task::none()
+}
+Message::SettingsAccentSelected(accent) => {
+    self.appearance.accent = accent;
+    if let Err(err) = self.appearance.save() {
+        self.push_log(format!("[Settings] Unable to save accent: {err}"));
+    }
+    Task::none()
+}
+Message::RequestCacheCleanup => {
+    if !self.busy { self.cache_cleanup_confirmation_open = true; }
+    Task::none()
+}
+Message::CancelCacheCleanup => {
+    self.cache_cleanup_confirmation_open = false;
+    Task::none()
+}
+Message::ConfirmCacheCleanup => {
+    self.cache_cleanup_confirmation_open = false;
+    if self.busy {
+        self.push_log("[Settings] Cannot clear downloads while an operation is active");
+    } else {
+        let root = lpmbox_core::app_paths::tool_download_dir();
+        match cache_cleanup::clean_transient_downloads(&root) {
+            Ok(report) => self.push_log(format!(
+                "[Settings] Removed {} incomplete download fragments ({} bytes). Firmware ZIP files preserved.",
+                report.files_removed, report.bytes_freed)),
+            Err(err) => self.push_log(format!("[Settings] Download cache cleanup failed: {err}")),
+        }
+    }
+    Task::none()
+}
+Message::OpenLicenseDialog => {
+    self.license_dialog_open = true;
+    Task::none()
+}
+Message::CloseLicenseDialog => {
+    self.license_dialog_open = false;
+    Task::none()
+}
+Message::RequestSavedLogCleanup => {
+    if !self.busy { self.log_cleanup_confirmation_open = true; }
+    Task::none()
+}
+Message::CancelSavedLogCleanup => {
+    self.log_cleanup_confirmation_open = false;
+    Task::none()
+}
+Message::ConfirmSavedLogCleanup => {
+    self.log_cleanup_confirmation_open = false;
+    if self.busy {
+        self.push_log("[Settings] Cannot delete saved logs while an operation is active");
+    } else {
+        let root = lpmbox_core::app_paths::log_dir();
+        match log_cleanup::remove_lpmbox_logs(&root, &root.join("diagnostics")) {
+            Ok(report) => self.push_log(format!(
+                "[Settings] Removed {} LPMBox log files ({} bytes). Other files and backups preserved.",
+                report.files_removed, report.bytes_freed)),
+            Err(err) => self.push_log(format!("[Settings] Log cleanup failed: {err}")),
+        }
+    }
+    Task::none()
+}
 Message::SettingsLanguageSelected(language) => {
     self.settings_language = language;
     set_active_language_option(language);
@@ -7112,12 +7712,24 @@ Message::WindowCloseRequested => {
 }
 
 Message::SidebarHoverEnter => {
-    self.sidebar_expanded = true;
+    if self.window_is_compact() { self.sidebar_expanded = true; }
     Task::none()
 }
 
 Message::SidebarHoverExit => {
     self.sidebar_expanded = false;
+    Task::none()
+}
+Message::WindowResized(width, height) => {
+    if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
+        let was_compact = self.window_is_compact();
+        self.window_size = (width, height);
+        if was_compact != self.window_is_compact() {
+            self.sidebar_expanded = false;
+            self.sidebar_anim = 0.0;
+            self.sidebar_velocity = 0.0;
+        }
+    }
     Task::none()
 }
 
@@ -7150,6 +7762,16 @@ Message::SidebarAnimTick => {
                     return Task::none();
                 };
 
+                let folder = match resolve_image_folder_selection(&folder) {
+                    Ok(image) => image,
+                    Err(message) => {
+                        self.image_dir = None;
+                        self.rom_firmware_info = None;
+                        self.rom_firmware_error = Some(message.to_owned());
+                        self.push_log(message);
+                        return Task::none();
+                    }
+                };
                 self.image_dir = Some(folder.clone());
                 self.rom_firmware_info = None;
                 self.rom_firmware_error = None;
@@ -7247,6 +7869,10 @@ Message::SidebarAnimTick => {
                     return Task::none();
                 }
 
+                if self.rom_external_adb_conflict() {
+                    return Task::none();
+                }
+
                 self.active_nav = NavPage::Log;
                 self.running_rom_target = Some(RomSlideTarget::Install);
                 self.busy = true;
@@ -7256,6 +7882,16 @@ Message::SidebarAnimTick => {
                 self.last_spft_stage = None;
 
                 self.active_log_flow = Some(RuntimeFlowKind::PrcRowInstall);
+
+                self.runtime_last_flow = Some(RuntimeFlowKind::PrcRowInstall);
+
+                self.runtime_started_at = Some(Instant::now());
+
+                self.runtime_finished_elapsed = None;
+
+                self.runtime_log_start_index = self.log_lines.len();
+
+                self.runtime_last_outcome = None;
                 let routine_version_log = lpm_routine_version_log_text(
                     active_language_option(),
                     self.rom_firmware_info.as_ref(),
@@ -7286,6 +7922,10 @@ thread::spawn(move || {
             return Task::none();
         }
 
+        if self.rom_external_adb_conflict() {
+            return Task::none();
+        }
+
         self.active_nav = NavPage::Log;
         self.running_rom_target = Some(RomSlideTarget::Update);
         self.busy = true;
@@ -7295,6 +7935,16 @@ thread::spawn(move || {
         self.last_spft_stage = None;
 
         self.active_log_flow = Some(RuntimeFlowKind::RowUpdate);
+
+        self.runtime_last_flow = Some(RuntimeFlowKind::RowUpdate);
+
+        self.runtime_started_at = Some(Instant::now());
+
+        self.runtime_finished_elapsed = None;
+
+        self.runtime_log_start_index = self.log_lines.len();
+
+        self.runtime_last_outcome = None;
         let routine_version_log = lpm_routine_version_log_text(
             active_language_option(),
             self.rom_firmware_info.as_ref(),
@@ -7325,6 +7975,10 @@ Message::StartReinstallWipe => {
         return Task::none();
     }
 
+    if self.rom_external_adb_conflict() {
+        return Task::none();
+    }
+
     self.active_nav = NavPage::Log;
     self.running_rom_target = Some(RomSlideTarget::Reinstall);
     self.busy = true;
@@ -7334,6 +7988,16 @@ Message::StartReinstallWipe => {
     self.last_spft_stage = None;
 
     self.active_log_flow = Some(RuntimeFlowKind::DeviceRecovery);
+
+    self.runtime_last_flow = Some(RuntimeFlowKind::DeviceRecovery);
+
+    self.runtime_started_at = Some(Instant::now());
+
+    self.runtime_finished_elapsed = None;
+
+    self.runtime_log_start_index = self.log_lines.len();
+
+    self.runtime_last_outcome = None;
     let routine_version_log = lpm_routine_version_log_text(
         active_language_option(),
         self.rom_firmware_info.as_ref(),
@@ -7429,6 +8093,7 @@ Message::StartReinstallWipe => {
             }
 
             Message::DrainLiveEvents => {
+                let prior_log_count=self.log_lines.len();
                 self.log_refresh_suspended = true;
                 self.tick_active_spinners();
 
@@ -7449,6 +8114,7 @@ Message::StartReinstallWipe => {
                 }
 
                 let mut finished = false;
+                let had_worker_events = !events.is_empty();
 
                 for event in events {
                     if self.handle_live_event(event) {
@@ -7463,7 +8129,13 @@ Message::StartReinstallWipe => {
                     let completed_rom_target = self.running_rom_target.take();
                     let completed_log_flow = self.active_log_flow.take();
 
-                    if disconnected && !finished && completed_log_flow.is_some() {
+                    // Do not label a completed SPFT flow as a cable failure
+                    // when the event sender disconnects on the next UI tick.
+                    if should_report_interrupted_flow(
+                        disconnected, finished, completed_log_flow.is_some(),
+                        self.runtime_last_outcome,
+                    ) {
+                        self.runtime_last_outcome = Some(false);
                         self.push_log("[Error] 작업이 비정상적으로 종료되었습니다.");
                         self.push_common_failure_guidance();
                     }
@@ -7474,6 +8146,7 @@ Message::StartReinstallWipe => {
                         }
                     }
 
+                    self.runtime_finished_elapsed = self.runtime_started_at.map(|at| at.elapsed());
                     self.busy = false;
                     self.live_rx = None;
                     self.progress_line_indices.clear();
@@ -7483,7 +8156,10 @@ Message::StartReinstallWipe => {
                     self.reset_rom_check_loading_stack();
 
                     if completed_rom_target.is_some() {
-                        self.active_nav = NavPage::Rom;
+                        // Keep the completed GBST-style progress/result page
+                        // visible until the user chooses the next ROM task.
+                        // Preserve the current page after a ROM job finishes.
+                        // The execution summary/log stays visible until the user navigates.
                         self.rom_show_routine_select = false;
                         self.rom_option_target = None;
                         self.rom_country_popup_open = false;
@@ -7493,6 +8169,15 @@ Message::StartReinstallWipe => {
                     }
                 }
 
+                if matches!(self.active_nav, NavPage::Log | NavPage::Rom)
+                    && (had_worker_events
+                        || finished || disconnected
+                        || self.log_lines.len()!=prior_log_count)
+                {
+                    return iced::widget::operation::snap_to_end(
+                        iced::widget::Id::new("lpmbox-rom-work-history")
+                    );
+                }
                 Task::none()
             }
 
@@ -7518,38 +8203,19 @@ Message::StartReinstallWipe => {
     }
 
 fn view(&self) -> Element<'_, Message> {
-    let status = if self.busy { lpm_translate_owned("작업 중".to_string()) } else { lpm_translate_owned("대기 중".to_string()) };
-
     let image_dir_text = self
         .image_dir
         .as_ref()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "선택된 image 폴더 없음".to_string());
 
-    let status_badge = if self.busy {
-        container(text(status.clone()).size(12))
-            .padding([6.0, 12.0])
-            .style(lpm_nav_status_busy_style)
-    } else {
-        container(text(status.clone()).size(12))
-            .padding([6.0, 12.0])
-            .style(lpm_nav_status_idle_style)
-    };
-
-    let header_right: Element<'_, Message> =
-        if self.active_nav == NavPage::Rom
-            || self.active_nav == NavPage::Driver
-            || self.active_nav == NavPage::Settings
-        {
-            iced::widget::Space::new()
-                .width(Length::Fixed(1.0))
-                .height(Length::Fixed(1.0))
-                .into()
-        } else {
-            status_badge.into()
-        };
-
-    let page_title = if self.active_nav == NavPage::Rom && self.rom_option_target.is_some() {
+    let page_title = if self.active_nav == NavPage::Log
+        && self.partition_wizard.as_ref().is_some_and(|w|w.result.is_some()) {
+        "작업 내역"
+    } else if self.active_nav == NavPage::Driver
+        && self.partition_wizard.is_some() {
+        self.partition_wizard.as_ref().map(|w|w.name()).unwrap_or("추가 옵션")
+    } else if self.active_nav == NavPage::Rom && self.rom_option_target.is_some() {
         "옵션 선택"
     } else if self.active_nav == NavPage::Rom && self.rom_show_routine_select {
         "작업 선택"
@@ -7559,31 +8225,33 @@ fn view(&self) -> Element<'_, Message> {
         nav_page_title(self.active_nav)
     };
 
-    let page_subtitle = if self.active_nav == NavPage::Rom && self.rom_option_target.is_some() {
+    let page_subtitle = if self.active_nav == NavPage::Log
+        && self.partition_wizard.as_ref().is_some_and(|w|w.result.is_some()) {
+        "파티션 작업 결과 및 진행도를 확인합니다."
+    } else if self.active_nav == NavPage::Log {
+        // Keep the bold "로그 관리" title without the redundant helper sentence.
+        ""
+    } else if self.active_nav == NavPage::Driver
+        && self.partition_wizard.is_some() {
+        if self.partition_wizard.as_ref().is_some_and(|w|w.mode==PartitionMode::Dump) {
+            ""
+        } else {
+            "MediaTek SP Flash Tool V6 · 단계별 파티션 작업"
+        }
+    } else if self.active_nav == NavPage::Rom && self.rom_option_target.is_some() {
         "ROM 작업을 진행하기 전 세부 옵션을 설정합니다."
     } else if self.active_nav == NavPage::Rom && self.rom_show_routine_select {
-        "아래 작업을 선택하여 기기에 적용합니다."
+        // "작업 선택" only; unnecessary top-of-page description removed.
+        ""
     } else if self.active_nav == NavPage::Rom && self.image_dir.is_some() {
-        "Image 폴더 정보를 확인합니다."
+        // "선택한 image 폴더 정보" only.
+        ""
+    } else if self.active_nav == NavPage::Rom {
+        // "image 폴더 선택" only.
+        ""
     } else {
         nav_page_subtitle(self.active_nav)
     };
-
-let header = container(
-    row![
-        column![
-            text(page_title).size(24),
-            text(page_subtitle).size(12),
-        ]
-        .spacing(3)
-        .width(Length::Fill),
-        header_right,
-    ]
-    .spacing(12),
-)
-.width(Length::Fill)
-.padding([14.0, 16.0])
-.style(lpm_nav_header_style);
 
     let image_panel = container(
         column![
@@ -7733,311 +8401,160 @@ let header = container(
     .width(Length::Fixed(300.0))
     .align_x(iced::Alignment::Center);
 
-    let driver_panel = container(
-        container(
-            row![ota_section, country_reset_section]
-                .spacing(0)
-                .align_y(iced::Alignment::Center),
-        )
-        .width(Length::Fixed(650.0))
-        .height(Length::Fixed(190.0))
-        .padding([22.0, 14.0])
-        .style(lpm_nav_extra_option_card_style),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .padding([24.0, 0.0])
-    .align_x(iced::alignment::Horizontal::Center);
+    // LTBox Advanced: grouped adaptive two-column action cards, not a
+    // single fixed-width panel that overflows a narrow sidebar layout.
+    let advanced_title = shell_muted(self.catalog("lpm.advanced.section.device"), 12);
+    let ota_card = container(ota_section).width(Length::FillPortion(1))
+        .padding(18).style(shell_panel_style);
+    let country_card = container(country_reset_section).width(Length::FillPortion(1))
+        .padding(18).style(shell_panel_style);
+    // Compact windows always keep the same one-column arrangement whether
+    // the navigation rail is open or closed. Wide windows use two columns.
+    let two_columns = lpm_advanced_two_columns(self.window_size.0);
+    let device_cards: Element<'_, Message> = if two_columns {
+        row![ota_card, country_card].spacing(12).width(Length::Fill).into()
+    } else {
+        column![ota_card, country_card].spacing(12).width(Length::Fill).into()
+    };
+    // Advanced page: only OTA and country-code reset remain visible.
+    // Legacy partition/ADB actions are preserved in code but deliberately
+    // removed from user-visible controls.
+    let driver_panel = container(scrollable(column![
+        advanced_title,
+        device_cards,
+    ].spacing(12).padding(20).width(Length::Fill)))
+        .width(Length::Fill).height(Length::Fill);
 
-let mut log_rows = column![]
-    .spacing(0)
-    .width(Length::Fill);
-
-if matches!(self.active_nav, NavPage::Log | NavPage::Backup) {
-    for log_row_text in &self.log_display_rows_cache {
-        log_rows = log_rows.push(
-            iced_text(log_row_text.as_str())
-                .size(LOG_FONT)
-                .width(Length::Fill)
-                .wrapping(iced::widget::text::Wrapping::Word),
-        );
-    }
-}
-
-let log_content = container(log_rows)
-    .width(Length::Fill)
-    .padding(iced::Padding {
-        top: 12.0,
-        right: 20.0,
-        bottom: 12.0,
-        left: 12.0,
-    });
-
-    let log_panel = container(
-        scrollable(log_content)
-            .anchor_bottom()
-            .anchor_left()
-            .auto_scroll(true)
-            .width(Length::Fill)
-            .height(Length::Fill),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .padding(0)
-    .style(log_container_style);
-
-    let log_section = container(
+    // The visual shell below follows the actual GBST v2.0.0 layout:
+    // full-window status bar, 64px heading, Material cards, pill navigation
+    // and a compact-overlaid / wide-docked sidebar. Existing MTK/ROM
+    // operations remain owned by LPMBox and are only connected to GUI actions.
+    let main_body: Element<'_, Message> = match self.active_nav {
+        NavPage::Dashboard => self.gbst_dashboard_panel(),
+        NavPage::Rom => {
+            if (self.busy && self.running_rom_target.is_some())
+                || (!self.busy && self.runtime_started_at.is_some()
+                    && self.runtime_last_flow.is_some_and(|flow| matches!(
+                        flow, RuntimeFlowKind::PrcRowInstall | RuntimeFlowKind::RowUpdate
+                            | RuntimeFlowKind::DeviceRecovery | RuntimeFlowKind::CountryReset
+                    ))) {
+                self.gbst_rom_execution_panel()
+            } else if self.rom_show_routine_select {
+                container(rom_panel).width(Length::Fill).height(Length::Fill)
+                    .padding(20).into()
+            } else if lpm_rom_panel_can_center(
+                self.rom_firmware_info.is_some(),
+                self.rom_firmware_error.is_some(),
+                self.window_size.0,
+                self.window_size.1,
+                self.gbst_sidebar_width(),
+            ) {
+                // Provide a bounded, fill-height parent to the picker and
+                // validation/summary cards, so horizontal AND vertical
+                // centering work beneath the fixed page heading.
+                container(rom_panel)
+                    .width(Length::Fill).height(Length::Fill)
+                    .padding(20).into()
+            } else {
+                // Keep scrolling for a completed summary whose width or
+                // height cannot fit (e.g. expanded navigation on a small PC).
+                container(iced::widget::scrollable(rom_panel)
+                    .width(Length::Fill).height(Length::Fill))
+                    .width(Length::Fill).height(Length::Fill)
+                    .padding(20).into()
+            }
+        }
+        NavPage::Backup => {
+            column![image_panel,backup_panel,self.gbst_log_panel()]
+                .spacing(16).padding(20).width(Length::Fill)
+                .height(Length::Fill).into()
+        }
+        NavPage::Driver => if self.partition_wizard.is_some() {
+            self.partition_wizard_panel()
+        } else { driver_panel.into() },
+        NavPage::Root | NavPage::Unroot => {
+            let is_root = self.active_nav == NavPage::Root;
+            let title = self.catalog(if is_root { "lpm.nav.root" } else { "lpm.nav.unroot" });
+            let body = self.catalog(if is_root { "lpm.root.unavailable" }
+                else { "lpm.unroot.unavailable" });
+            container(column![
+                text(title).size(20).font(lpm_bold_font()),
+                shell_muted(body, 14),
+                shell_action(self.catalog("lpm.advanced.back"), Message::SelectNav(NavPage::Driver),
+                    true, false)
+            ].spacing(18).width(Length::Fill).padding(28))
+                .width(Length::Fill).height(Length::Fill).padding(20)
+                .style(shell_main_style).into()
+        }
+        NavPage::FirmwareDownload => self.gbst_settings_panel(),
+        NavPage::Qna => self.gbst_settings_panel(),
+        NavPage::Log => {
+            if let Some(w)=self.partition_wizard.as_ref().filter(|w|w.result.is_some()) {
+                self.partition_execute_step(w)
+            } else if self.runtime_last_flow.is_some_and(|flow| matches!(
+                flow,
+                RuntimeFlowKind::PrcRowInstall
+                    | RuntimeFlowKind::RowUpdate
+                    | RuntimeFlowKind::DeviceRecovery
+                    | RuntimeFlowKind::CountryReset
+            )) && (self.runtime_started_at.is_some())
+                && (!self.busy || self.active_log_flow == self.runtime_last_flow)
+            {
+                self.gbst_rom_execution_panel()
+            } else {
+                container(self.gbst_log_panel())
+                    .width(Length::Fill).height(Length::Fill)
+                    .padding(16).into()
+            }
+        }
+        NavPage::Settings => self.gbst_settings_panel(),
+        NavPage::About => self.gbst_about_panel(),
+    };
+    let page_column = if matches!(self.active_nav, NavPage::Dashboard | NavPage::About) {
+        column![container(main_body).width(Length::Fill).height(Length::Fill)
+            .style(shell_main_style)]
+            .height(Length::Fill).spacing(0)
+    } else {
         column![
-            row![
-                text("작업 로그").size(18),
-                text("ADB / Fastboot / PreLoader / SPFlashToolV6 진행 상태").size(12),
-            ]
-            .spacing(10),
-            row![
-                button(text("로그 내보내기").size(BODY_FONT)).on_press(Message::ExportLog),
-                button(text("로그 지우기").size(BODY_FONT)).on_press(Message::ClearLog),
-            ]
-            .spacing(8),
-            log_panel,
-        ]
-        .spacing(10),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .padding(14)
-    .style(lpm_nav_panel_style);
-
-    let language_picker = pick_list(
-        LANGUAGE_OPTIONS,
-        Some(self.settings_language),
-        Message::SettingsLanguageSelected,
-    )
-    .text_size(12)
-    .style(lpm_nav_language_pick_list_style)
-    .menu_style(lpm_nav_language_pick_list_menu_style)
-    .width(Length::Fixed(170.0));
-
-    let settings_panel = container(
-        column![
-            container(
-                row![
-                    column![
-                        text("언어 변경")
-                            .size(22)
-                            .font(lpm_bold_font()),
-                        text("프로그램 언어를 변경합니다.")
-                            .size(12),
-                    ]
-                    .spacing(6)
-                    .width(Length::Fill),
-                    language_picker,
-                ]
-                .spacing(10)
-                .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .padding([4.0, 0.0]),
-            container(
-                row![
-                    column![
-                        text("개발자 유튜브")
-                            .size(22)
-                            .font(lpm_bold_font()),
-                        text("샤오신패드에 유용한 프로그램을 확인하실 수 있습니다.")
-                            .size(12),
-                    ]
-                    .spacing(6)
-                    .width(Length::Fill),
-                    button(
-                        container(text("이동").size(12))
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .align_x(iced::alignment::Horizontal::Center)
-                            .align_y(iced::alignment::Vertical::Center),
-                    )
-                    .width(Length::Fixed(100.0))
-                    .height(Length::Fixed(28.0))
-                    .padding(0.0)
-                    .style(lpm_nav_settings_move_button_style)
-                    .on_press(Message::OpenDeveloperYoutube),
-                ]
-                .spacing(10)
-                .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .padding([4.0, 0.0]),
-            container(
-                row![
-                    column![
-                        text("후원하기")
-                            .size(22)
-                            .font(lpm_bold_font()),
-                        text("개발자에게 큰 힘과 응원이 됩니다.")
-                            .size(12),
-                    ]
-                    .spacing(6)
-                    .width(Length::Fill),
-                    button(
-                        container(text("이동").size(12))
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .align_x(iced::alignment::Horizontal::Center)
-                            .align_y(iced::alignment::Vertical::Center),
-                    )
-                    .width(Length::Fixed(100.0))
-                    .height(Length::Fixed(28.0))
-                    .padding(0.0)
-                    .style(lpm_nav_settings_move_button_style)
-                    .on_press(Message::OpenDonate),
-                ]
-                .spacing(10)
-                .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .padding([4.0, 0.0]),
-            container(
-                row![
-                    column![
-                        text("프로그램 업데이트")
-                            .size(22)
-                            .font(lpm_bold_font()),
-                        text("LPMBox 최신 릴리즈 버전을 확인합니다.")
-                            .size(12),
-                    ]
-                    .spacing(6)
-                    .width(Length::Fill),
-                    if self.program_update_checking {
-                        button(
-                            container(text("확인 중").size(12))
-                                .width(Length::Fill)
-                                .height(Length::Fill)
-                                .align_x(iced::alignment::Horizontal::Center)
-                                .align_y(iced::alignment::Vertical::Center),
-                        )
-                        .width(Length::Fixed(100.0))
-                        .height(Length::Fixed(28.0))
-                        .padding(0.0)
-                        .style(lpm_nav_settings_move_button_style)
-                    } else {
-                        button(
-                            container(text("확인").size(12))
-                                .width(Length::Fill)
-                                .height(Length::Fill)
-                                .align_x(iced::alignment::Horizontal::Center)
-                                .align_y(iced::alignment::Vertical::Center),
-                        )
-                        .width(Length::Fixed(100.0))
-                        .height(Length::Fixed(28.0))
-                        .padding(0.0)
-                        .style(lpm_nav_settings_move_button_style)
-                        .on_press(Message::CheckProgramUpdate)
-                    },
-                ]
-                .spacing(10)
-                .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .padding([4.0, 0.0]),
-            container(
-                row![
-                    column![
-                        text("피드백")
-                            .size(22)
-                            .font(lpm_bold_font()),
-                        text("의견을 주시면 프로그램이 완벽해질 수 있습니다.")
-                            .size(12),
-                    ]
-                    .spacing(6)
-                    .width(Length::Fill),
-                    button(
-                        container(text("이동").size(12))
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .align_x(iced::alignment::Horizontal::Center)
-                            .align_y(iced::alignment::Vertical::Center),
-                    )
-                    .width(Length::Fixed(100.0))
-                    .height(Length::Fixed(28.0))
-                    .padding(0.0)
-                    .style(lpm_nav_settings_move_button_style)
-                    .on_press(Message::OpenFeedback),
-                ]
-                .spacing(10)
-                .align_y(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .padding([4.0, 0.0]),
-        ]
-        .spacing(24),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .padding([18.0, 16.0])
-    .style(lpm_nav_settings_panel_style);
-
-    let main_stack = match self.active_nav {
-        NavPage::Dashboard => column![self.dashboard_panel()],
-        NavPage::Rom => column![header, rom_panel],
-        NavPage::Backup => column![header, image_panel, backup_panel, log_section],
-        NavPage::Driver => column![header, driver_panel],
-        NavPage::FirmwareDownload => column![header, settings_panel],
-        NavPage::Qna => column![header, settings_panel],
-        NavPage::Log => column![header, log_section],
-        NavPage::Settings => column![header, settings_panel],
+            self.gbst_page_header(page_title,page_subtitle),
+            container(main_body).width(Length::Fill)
+                .height(Length::Fill).style(shell_main_style)
+        ].height(Length::Fill).spacing(0)
+    };
+    let main = container(page_column).width(Length::Fill).height(Length::Fill);
+    // Always dock the live-width sidebar. Overlaying it on compact layouts
+    // used to hide the left part of the Advanced cards and translated ROM
+    // headings while the menu was expanded.
+    let row_area: Element<'_, Message> = row![self.gbst_sidebar(), main]
+        .width(Length::Fill).height(Length::Fill).into();
+    let frame: Element<'_, Message> = column![row_area,self.gbst_footer()]
+        .width(Length::Fill).height(Length::Fill).spacing(0).into();
+    let mut layers: Vec<Element<'_, Message>> = vec![frame];
+    if self.should_show_dashboard_update_notice() {
+        layers.push(self.dashboard_update_notice_view());
     }
-    .spacing(10)
-    .width(Length::Fill)
-    .height(Length::Fill);
-
-    let footer = container(
-        row![
-            iced_text(format!("● {status}")).size(12).width(Length::Fill),
-            iced_text(format!("v{APP_DISPLAY_VERSION}")).size(12).width(Length::Fixed(60.0)).align_x(iced::alignment::Horizontal::Right),
-        ]
-        .spacing(10),
-    )
-    .width(Length::Fill)
-    .padding([6.0, 12.0])
-    .style(lpm_nav_footer_style);
-
-    let main_content = container(column![
-        container(main_stack)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(12)
-            .style(lpm_nav_app_background_style),
-        footer,
-    ])
-    .width(Length::Fill)
-    .height(Length::Fill);
-
-    let rail_placeholder = container(iced::widget::Space::new())
-        .width(Length::Fixed(SIDEBAR_RAIL_WIDTH))
-        .height(Length::Fill);
-
-    let row_base = row![rail_placeholder, main_content].height(Length::Fill);
-
-let mut layers: Vec<Element<'_, Message>> = vec![row_base.into(), self.sidebar()];
-
-if self.rom_country_popup_open {
-    layers.push(self.rom_country_popup_view());
-}
-
-if self.rom_should_show_vc_runtime_popup() {
-    layers.push(self.rom_vc_runtime_popup_view());
-} else if self.rom_should_show_mtk_driver_popup() {
-    layers.push(self.rom_mtk_driver_popup_view());
-}
-
-if self.should_show_dashboard_update_notice() {
-    layers.push(self.dashboard_update_notice_view());
-}
-
-let stacked = iced::widget::Stack::with_children(layers)
-    .width(Length::Fill)
-    .height(Length::Fill);
-
-stacked.into()
+    if self.license_dialog_open {
+        layers.push(self.gbst_license_popup());
+    }
+    if self.log_cleanup_confirmation_open {
+        layers.push(self.gbst_confirm_cleanup_popup(true));
+    }
+    if self.cache_cleanup_confirmation_open {
+        layers.push(self.gbst_confirm_cleanup_popup(false));
+    }
+    if self.rom_country_popup_open {
+        layers.push(self.rom_country_popup_view());
+    }
+    if self.rom_should_show_vc_runtime_popup() {
+        layers.push(self.rom_vc_runtime_popup_view());
+    } else if self.rom_should_show_mtk_driver_popup() {
+        layers.push(self.rom_mtk_driver_popup_view());
+    }
+    if self.startup_disclaimer_open {
+        layers.push(self.startup_disclaimer_dialog());
+    }
+    iced::widget::Stack::with_children(layers)
+        .width(Length::Fill).height(Length::Fill).into()
 }
 
 fn nav_icon_handle(&self, page: NavPage) -> iced::widget::image::Handle {
@@ -8045,16 +8562,92 @@ fn nav_icon_handle(&self, page: NavPage) -> iced::widget::image::Handle {
         NavPage::Dashboard => self.nav_home_handle.clone(),
         NavPage::Rom => self.nav_refresh_handle.clone(),
         NavPage::Driver => self.nav_tab_settings_handle.clone(),
+        NavPage::Root => self.nav_root_handle.clone(),
+        NavPage::Unroot => self.nav_unroot_handle.clone(),
         NavPage::FirmwareDownload => self.nav_firmware_download_handle.clone(),
         NavPage::Qna => self.nav_qna_handle.clone(),
         NavPage::Log => self.nav_log_handle.clone(),
         NavPage::Settings => self.nav_settings_handle.clone(),
+        NavPage::About => self.nav_about_handle.clone(),
         NavPage::Backup => self.nav_log_handle.clone(),
     }
 }
 
+fn cache_cleanup_popup_view(&self) -> Element<'_, Message> {
+    let content = container(column![
+        text(self.catalog("cache.title")).size(20).font(lpm_bold_font()),
+        text(self.catalog("cache.warning")).size(13),
+        row![
+            button(text(self.catalog("common.cancel"))).on_press(Message::CancelCacheCleanup),
+            button(text(self.catalog("cache.clean"))).on_press(Message::ConfirmCacheCleanup),
+        ].spacing(12),
+    ].spacing(16))
+    .padding(24).width(Length::Fixed(500.0))
+    .style(lpm_nav_settings_panel_style);
+    container(content)
+        .width(Length::Fill).height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(|_| container::Style {
+            background: Some(Background::Color(Color::from_rgba8(12, 14, 20, 0.72))),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+fn license_popup_view(&self) -> Element<'_, Message> {
+    let body = container(
+        column![
+            text(self.catalog("about.title")).size(22).font(lpm_bold_font()),
+            text("LPMBox - GPL-3.0-only").size(13),
+            scrollable(text(include_str!("../../../LICENSE")).size(11))
+                .height(Length::Fill).width(Length::Fill),
+            button(text(self.catalog("common.close"))).on_press(Message::CloseLicenseDialog),
+        ].spacing(12),
+    )
+    .width(Length::Fixed(700.0))
+    .height(Length::Fixed(565.0))
+    .padding(20)
+    .style(lpm_nav_settings_panel_style);
+    container(body)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(|_| container::Style {
+            background: Some(Background::Color(Color::from_rgba8(12, 14, 20, 0.72))),
+            ..container::Style::default()
+        })
+        .into()
+}
+
+fn log_cleanup_popup_view(&self) -> Element<'_, Message> {
+    let content = container(column![
+        text(self.catalog("logs.cleanup")).size(20).font(lpm_bold_font()),
+        text(self.catalog("logs.cleanup.description")).size(14),
+        text(self.catalog("logs.cleanup.warning")).size(12),
+        row![
+            button(text(self.catalog("common.cancel"))).on_press(Message::CancelSavedLogCleanup),
+            button(text(self.catalog("logs.cleanup.confirm"))).on_press(Message::ConfirmSavedLogCleanup),
+        ].spacing(12),
+    ].spacing(16))
+    .padding(24).width(Length::Fixed(480.0))
+    .style(lpm_nav_settings_panel_style);
+    container(content)
+        .width(Length::Fill).height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(|_| container::Style {
+            background: Some(Background::Color(Color::from_rgba8(12, 14, 20, 0.72))),
+            ..container::Style::default()
+        })
+        .into()
+}
+
 fn sidebar(&self) -> Element<'_, Message> {
-    let label_t = ((self.sidebar_anim - 0.4) / 0.5).clamp(0.0, 1.0);
+    let label_t = if self.window_is_compact() {
+        ((self.sidebar_anim - 0.4) / 0.5).clamp(0.0, 1.0)
+    } else { 1.0 };
     let label_alpha = ease_out_cubic(label_t);
 
     let mut nav = column![].spacing(1).padding([16.0, 0.0]);
@@ -8083,8 +8676,11 @@ fn sidebar(&self) -> Element<'_, Message> {
         ));
     }
 
-    let width =
-        SIDEBAR_RAIL_WIDTH + (SIDEBAR_EXPANDED_WIDTH - SIDEBAR_RAIL_WIDTH) * self.sidebar_anim;
+    let width = if self.window_is_compact() {
+        SIDEBAR_RAIL_WIDTH + (SIDEBAR_EXPANDED_WIDTH - SIDEBAR_RAIL_WIDTH) * self.sidebar_anim
+    } else {
+        SIDEBAR_EXPANDED_WIDTH
+    };
 
     let panel = container(nav)
         .width(Length::Fixed(width))
@@ -8106,12 +8702,11 @@ fn sidebar(&self) -> Element<'_, Message> {
         .into()
 }
 
+fn window_is_compact(&self) -> bool {
+    self.window_size.0 < 1080.0
+}
 fn sidebar_anim_target(&self) -> f32 {
-    if self.sidebar_expanded {
-        1.0
-    } else {
-        0.0
-    }
+    if self.window_is_compact() && self.sidebar_expanded { 1.0 } else { 0.0 }
 }
 
 fn dashboard_panel(&self) -> Element<'_, Message> {
@@ -8260,8 +8855,17 @@ let info_grid = row![column1, column2, column3]
 fn rom_image_folder_select_panel(&self) -> Element<'_, Message> {
     let content: Element<'_, Message> = if let Some(image_dir) = &self.image_dir {
         self.rom_after_folder_selected_panel(image_dir.display().to_string())
+    } else if let Some(error) = &self.rom_firmware_error {
+        column![self.rom_select_folder_card(), self.rom_firmware_error_panel(error)]
+            .spacing(14)
+            .width(Length::Fill)
+            .align_x(iced::Alignment::Center)
+            .into()
     } else {
-        self.rom_select_folder_card()
+        container(self.rom_select_folder_card())
+            .width(Length::Fill)
+            .align_x(iced::alignment::Horizontal::Center)
+            .into()
     };
 
     container(content)
@@ -8281,7 +8885,11 @@ fn rom_image_folder_select_panel(&self) -> Element<'_, Message> {
 fn rom_select_folder_card(&self) -> Element<'_, Message> {
     let select_card_content = container(
         column![
-            iced::widget::image(self.folder_select_icon_handle.clone())
+            iced::widget::image(if self.uses_dark_icon_palette() {
+                self.folder_select_icon_dark_handle.clone()
+            } else {
+                self.folder_select_icon_handle.clone()
+            })
                 .width(Length::Fixed(90.0))
                 .height(Length::Fixed(90.0)),
 
@@ -8310,22 +8918,30 @@ fn rom_select_folder_card(&self) -> Element<'_, Message> {
 }
 
 fn rom_after_folder_selected_panel(&self, image_dir_text: String) -> Element<'_, Message> {
-let loading_handle = if self.loading_progress_handles.is_empty() {
-    smooth_png_handle(
-        LOADING_PROGRESS_FRAME_01_BYTES,
-        LOADING_PROGRESS_SIZE,
-        LOADING_PROGRESS_SIZE,
-    )
+let dark_icons = self.uses_dark_icon_palette();
+let progress_handles = if dark_icons {
+    &self.loading_progress_dark_handles
 } else {
-    self.loading_progress_handles
-        .get(self.rom_check_loading_frame % self.loading_progress_handles.len())
-        .cloned()
-        .unwrap_or_else(|| smooth_png_handle(
-            LOADING_PROGRESS_FRAME_01_BYTES,
-            LOADING_PROGRESS_SIZE,
-            LOADING_PROGRESS_SIZE,
-        ))
+    &self.loading_progress_handles
 };
+let loading_handle = progress_handles
+    .get(self.rom_check_loading_frame % progress_handles.len().max(1))
+    .cloned()
+    .unwrap_or_else(|| {
+        if dark_icons {
+            dark_outline_png_handle(
+                LOADING_PROGRESS_FRAME_01_BYTES,
+                LOADING_PROGRESS_SIZE,
+                LOADING_PROGRESS_SIZE,
+            )
+        } else {
+            smooth_png_handle(
+                LOADING_PROGRESS_FRAME_01_BYTES,
+                LOADING_PROGRESS_SIZE,
+                LOADING_PROGRESS_SIZE,
+            )
+        }
+    });
 
 let loading_image = iced::widget::image(loading_handle)
     .width(Length::Fixed(LOADING_PROGRESS_SIZE as f32))
@@ -8417,7 +9033,7 @@ let loading_image = iced::widget::image(loading_handle)
         && self.rom_option_target.is_none();
 
     let section_panel = container(sections)
-        .width(Length::Fixed(700.0))
+        .width(Length::Fill).max_width(700.0)
         .height(if routine_select_page { Length::Fill } else { Length::Shrink })
         .padding(if self.rom_option_target.is_some() || routine_select_page {
             0
@@ -8464,10 +9080,17 @@ fn rom_image_info_dashboard_panel(
 
     let uptime_text = lpm_clean_display_value(&self.dashboard_info.uptime_display);
 
-    let tablet_handle = if connected_problem {
-        self.tablet_x_icon_handle.clone()
+    let dark_icons = self.uses_dark_icon_palette();
+    let tablet_handle = match (dark_icons, connected_problem) {
+        (true, true) => self.tablet_x_icon_dark_handle.clone(),
+        (true, false) => self.tablet_check_icon_dark_handle.clone(),
+        (false, true) => self.tablet_x_icon_handle.clone(),
+        (false, false) => self.tablet_check_icon_handle.clone(),
+    };
+    let folder_handle = if dark_icons {
+        self.folder_check_icon_dark_handle.clone()
     } else {
-        self.tablet_check_icon_handle.clone()
+        self.folder_check_icon_handle.clone()
     };
 
     let folder_icon_widget: Element<'static, Message> = if validation_state.image_model_bad {
@@ -8477,7 +9100,7 @@ fn rom_image_info_dashboard_panel(
                     .size(10)
                     .width(Length::Fill)
                     .align_x(iced::alignment::Horizontal::Center),
-                iced::widget::image(self.folder_check_icon_handle.clone())
+                iced::widget::image(folder_handle.clone())
                     .width(Length::Fixed(80.0))
                     .height(Length::Fixed(80.0)),
             ]
@@ -8491,7 +9114,7 @@ fn rom_image_info_dashboard_panel(
         .into()
     } else {
         container(
-            iced::widget::image(self.folder_check_icon_handle.clone())
+            iced::widget::image(folder_handle.clone())
                 .width(Length::Fixed(105.0))
                 .height(Length::Fixed(105.0)),
         )
@@ -8532,10 +9155,10 @@ fn rom_image_info_dashboard_panel(
     .align_y(iced::alignment::Vertical::Center);
 
     let left_card = container(left_card_inner)
-        .width(Length::Fixed(390.0))
+        .width(Length::Fixed(ROM_FOLDER_LEFT_CARD_WIDTH))
         .height(Length::Fixed(262.0))
         .padding(14)
-        .style(move |_theme: &Theme| lpm_nav_rom_status_card_style(folder_problem));
+        .style(move |theme: &Theme| lpm_nav_rom_status_card_style(theme, folder_problem));
 
     let tablet_icon_line = row![
         container(
@@ -8577,7 +9200,7 @@ fn rom_image_info_dashboard_panel(
         .width(Length::Fixed(275.0))
         .height(Length::Fixed(126.0))
         .padding(10)
-        .style(move |_theme: &Theme| lpm_nav_rom_status_card_style(connected_problem));
+        .style(move |theme: &Theme| lpm_nav_rom_status_card_style(theme, connected_problem));
 
     let battery_icon_line = row![
         container(
@@ -8619,56 +9242,72 @@ fn rom_image_info_dashboard_panel(
         .width(Length::Fixed(275.0))
         .height(Length::Fixed(126.0))
         .padding(10)
-        .style(move |_theme: &Theme| lpm_nav_rom_status_card_style(battery_problem));
+        .style(move |theme: &Theme| lpm_nav_rom_status_card_style(theme, battery_problem));
 
     let right_column = column![right_top, right_bottom]
         .spacing(10)
         .width(Length::Fixed(275.0));
 
-    let info_area = row![left_card, right_column]
-        .spacing(12)
-        .width(Length::Shrink)
-        .align_y(iced::Alignment::Center);
+    // In compact mode, docking the expanded sidebar reduces usable content
+    // width. Stack the image/device/battery cards rather than hiding the
+    // device column behind the navigation or beyond the right edge.
+    let info_area: Element<'static, Message> =
+        if !lpm_firmware_summary_two_columns(self.window_size.0, self.gbst_sidebar_width()) {
+            column![left_card, right_column]
+                .spacing(12)
+                .width(Length::Fill)
+                .align_x(iced::Alignment::Center)
+                .into()
+        } else {
+            row![left_card, right_column]
+                .spacing(12)
+                .width(Length::Shrink)
+                .align_y(iced::Alignment::Center)
+                .into()
+        };
 
     let reselect_label = lpm_translate_owned("폴더 재선택".to_string());
     let next_step_label = lpm_translate_owned("다음 단계로 이동".to_string());
     let bottom_button_width = lpm_equal_button_width(&[reselect_label.as_str(), next_step_label.as_str()], 96.0, 190.0);
 
     let reselect_button = button(
-        container(iced_text(reselect_label).size(ROM_BOTTOM_BUTTON_FONT))
+        container(iced_text(reselect_label).size(ROM_BOTTOM_BUTTON_FONT)
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph))
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(iced::alignment::Horizontal::Center)
             .align_y(iced::alignment::Vertical::Center),
     )
     .width(Length::Fixed(bottom_button_width))
-    .height(Length::Fixed(30.0))
+    .height(Length::Fixed(48.0))
     .padding(0.0)
     .on_press(Message::SelectImageFolder);
 
     let next_step_button: Element<'static, Message> = if can_go_next {
         button(
-            container(iced_text(next_step_label).size(ROM_BOTTOM_BUTTON_FONT))
+            container(iced_text(next_step_label).size(ROM_BOTTOM_BUTTON_FONT)
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .align_x(iced::alignment::Horizontal::Center)
                 .align_y(iced::alignment::Vertical::Center),
         )
         .width(Length::Fixed(bottom_button_width))
-        .height(Length::Fixed(30.0))
+        .height(Length::Fixed(48.0))
         .padding(0.0)
         .on_press(Message::RomProceedToRoutine)
         .into()
     } else {
         button(
-            container(iced_text(next_step_label).size(ROM_BOTTOM_BUTTON_FONT))
+            container(iced_text(next_step_label).size(ROM_BOTTOM_BUTTON_FONT)
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .align_x(iced::alignment::Horizontal::Center)
                 .align_y(iced::alignment::Vertical::Center),
         )
         .width(Length::Fixed(bottom_button_width))
-        .height(Length::Fixed(30.0))
+        .height(Length::Fixed(48.0))
         .padding(0.0)
         .style(lpm_nav_disabled_next_button_style)
         .into()
@@ -8705,12 +9344,12 @@ fn rom_image_info_dashboard_panel(
                 .size(validation_font_size)
                 .width(Length::Fill)
                 .align_x(validation_alignment)
-                .wrapping(iced::widget::text::Wrapping::Word),
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
         );
     }
 
     let validation_log = container(validation_rows)
-        .width(Length::Fixed(560.0))
+        .width(Length::Fill).max_width(560.0)
         .padding([8.0, 12.0])
         .style(lpm_nav_rom_validation_log_style);
 
@@ -9278,8 +9917,25 @@ fn rom_routine_select_panel(&self, info: &FirmwareInfo) -> Element<'static, Mess
         "기기가 켜지지 않거나, 무한 재부팅 등 다양한 오류를 고칩니다.",
     );
 
+    let dark_icons = self.uses_dark_icon_palette();
+    let install_icon = if dark_icons {
+        self.rom_install_icon_dark_handle.clone()
+    } else {
+        self.rom_install_icon_handle.clone()
+    };
+    let update_icon = if dark_icons {
+        self.rom_update_icon_dark_handle.clone()
+    } else {
+        self.rom_update_icon_handle.clone()
+    };
+    let repair_icon = if dark_icons {
+        self.tablet_fix_icon_dark_handle.clone()
+    } else {
+        self.tablet_fix_icon_handle.clone()
+    };
+
     let install_row = self.rom_routine_slide_row(
-        self.rom_install_icon_handle.clone(),
+        install_icon,
         self.warning_icon_handle.clone(),
         RomSlideTarget::Install,
         lpm_rom_routine_ui_text(lang, "PRC ↔ ROW 설치"),
@@ -9293,7 +9949,7 @@ fn rom_routine_select_panel(&self, info: &FirmwareInfo) -> Element<'static, Mess
     );
 
     let update_row = self.rom_routine_slide_row(
-        self.rom_update_icon_handle.clone(),
+        update_icon,
         self.warning_icon_handle.clone(),
         RomSlideTarget::Update,
         lpm_rom_routine_ui_text(lang, "ROW(글로벌롬) 업데이트"),
@@ -9307,14 +9963,14 @@ fn rom_routine_select_panel(&self, info: &FirmwareInfo) -> Element<'static, Mess
     );
 
     let reinstall_row = self.rom_routine_slide_row(
-        self.tablet_fix_icon_handle.clone(),
+        repair_icon,
         self.warning_icon_handle.clone(),
         RomSlideTarget::Reinstall,
         lpm_rom_routine_ui_text(lang, "기기 복구"),
         reinstall_description,
         lpm_rom_routine_ui_text(lang, "기기 복구 루틴"),
-        "'The current system is not compatible',",
-        "'Red state that restarts every 5 seconds',",
+        lpm_rom_routine_ui_text(lang, "'The current system is not compatible',"),
+        lpm_rom_routine_ui_text(lang, "'Red state that restarts every 5 seconds',"),
         lpm_rom_routine_ui_text(lang, "'펌웨어 설치 실패' 등 기기를 복구합니다."),
         Message::StartReinstallWipe,
         false,
@@ -9334,7 +9990,7 @@ fn rom_routine_select_panel(&self, info: &FirmwareInfo) -> Element<'static, Mess
         reinstall_row,
     ]
     .spacing(12)
-    .width(Length::Fixed(ROM_ROUTINE_CARD_WIDTH))
+    .width(Length::Fill)
     .align_x(iced::Alignment::Center);
 
     container(routine_group)
@@ -9508,9 +10164,9 @@ fn rom_options_panel(&self, info: &FirmwareInfo) -> Element<'static, Message> {
     let wipe_group = row![
         column![
             iced_text(lpm_rom_option_text(lang, "data_wipe_title"))
-                .size(22)
+                .size(20)
                 .font(lpm_bold_font())
-                .wrapping(iced::widget::text::Wrapping::None),
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
             iced_text(wipe_description)
                 .size(12)
                 .wrapping(iced::widget::text::Wrapping::Word),
@@ -9536,8 +10192,8 @@ fn rom_options_panel(&self, info: &FirmwareInfo) -> Element<'static, Message> {
 
     let country_button = button(country_button_content)
         .width(Length::Shrink)
-        .height(Length::Fixed(30.0))
-        .padding([0.0, 16.0]);
+        .height(Length::Fixed(42.0))
+        .padding([4.0, 12.0]);
 
     let country_button = if country_code_locked {
         country_button.style(lpm_nav_disabled_next_button_style)
@@ -9548,9 +10204,9 @@ fn rom_options_panel(&self, info: &FirmwareInfo) -> Element<'static, Message> {
     let country_group = row![
         column![
             iced_text(lpm_rom_option_text(lang, "country_title"))
-                .size(20)
+                .size(19)
                 .font(lpm_bold_font())
-                .wrapping(iced::widget::text::Wrapping::None),
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
             iced_text(country_description)
                 .size(12)
                 .wrapping(iced::widget::text::Wrapping::Word),
@@ -9582,7 +10238,7 @@ fn rom_options_panel(&self, info: &FirmwareInfo) -> Element<'static, Message> {
         iced_text(lpm_rom_option_text(lang, "before_start"))
             .size(18)
             .font(lpm_bold_font())
-            .wrapping(iced::widget::text::Wrapping::None),
+            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
         iced_text(preflight_image_rom_text)
             .size(11)
             .wrapping(iced::widget::text::Wrapping::Word),
@@ -9593,15 +10249,24 @@ fn rom_options_panel(&self, info: &FirmwareInfo) -> Element<'static, Message> {
     .spacing(4)
     .width(Length::Fill);
 
-    let option_card = container(
-        column![wipe_group, country_group, preflight_group]
-            .spacing(20)
-            .width(Length::Fill)
-            .align_x(iced::Alignment::Center),
-    )
-    .width(Length::Fixed(590.0))
-    .height(Length::Fixed(275.0))
-    .padding([28.0, 38.0])
+    let mut option_content = column![wipe_group, country_group, preflight_group]
+        .spacing(20).width(Length::Fill)
+        .align_x(iced::Alignment::Center);
+    if self.external_adb_server_active {
+        option_content = option_content.push(
+            container(
+                text(self.catalog("lpm.adb.rom_blocked"))
+                    .size(12).width(Length::Fill)
+                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
+                    .style(shell_warning_text_style)
+            ).padding(12).width(Length::Fill).style(shell_warning_inner_style)
+        );
+    }
+
+    let option_card = container(option_content)
+    .width(Length::Fill).max_width(590.0)
+    .height(Length::Shrink)
+    .padding([24.0, 24.0])
     .style(lpm_nav_rom_option_card_style);
 
     container(
@@ -9620,7 +10285,7 @@ fn rom_options_panel(&self, info: &FirmwareInfo) -> Element<'static, Message> {
                     .on_press(Message::RomContinueFromOptions),
             ]
             .spacing(8)
-            .width(Length::Fixed(590.0)),
+            .width(Length::Fill),
         ]
         .spacing(12)
         .width(Length::Fill)
@@ -9638,66 +10303,84 @@ fn should_show_dashboard_update_notice(&self) -> bool {
 }
 
 fn dashboard_update_notice_view(&self) -> Element<'_, Message> {
+    // Keep both actions reachable for every supported locale and window width.
+    // The old 260x150 card had only 220px of inner width for 228px of buttons.
     let version_label = self
         .dashboard_update_notice
         .as_ref()
-        .map(|info| format!("현재 {} → 최신 {}", info.current_version, info.latest_version))
-        .unwrap_or_else(|| "새로운 버전을 감지했습니다.".to_string());
+        .map(|info| {
+            format!(
+                "{} {}  →  {} {}",
+                self.catalog("lpm.update.notice.current"),
+                info.current_version,
+                self.catalog("lpm.update.notice.latest"),
+                info.latest_version
+            )
+        })
+        .unwrap_or_else(|| self.catalog("lpm.update.notice.detected"));
 
     let popup_content = container(
         column![
-            text("새로운 업데이트가 있습니다.")
-                .size(18)
+            text(self.catalog("lpm.update.notice.title"))
+                .size(20)
                 .font(lpm_bold_font())
                 .width(Length::Fill)
                 .align_x(iced::alignment::Horizontal::Center)
-                .wrapping(iced::widget::text::Wrapping::None),
-            text("현재 버전의 문제를\n해결하고 업그레이드한 파일을\n감지했습니다.")
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+            text(self.catalog("lpm.update.notice.description"))
+                .size(14)
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center)
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+            text(version_label)
                 .size(12)
                 .width(Length::Fill)
                 .align_x(iced::alignment::Horizontal::Center)
-                .wrapping(iced::widget::text::Wrapping::Word),
-            text(version_label)
-                .size(10)
-                .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center)
-                .wrapping(iced::widget::text::Wrapping::None),
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
             row![
                 button(
-                    container(text("파일 업데이트 (권장)").size(11))
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .align_x(iced::alignment::Horizontal::Center)
-                        .align_y(iced::alignment::Vertical::Center),
+                    container(
+                        text(self.catalog("lpm.update.notice.install"))
+                            .size(13)
+                            .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
+                            .align_x(iced::alignment::Horizontal::Center)
+                    )
+                    .width(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Center),
                 )
-                .width(Length::Fixed(120.0))
-                .height(Length::Fixed(28.0))
-                .padding(0.0)
+                .width(Length::Fill)
+                .height(Length::Shrink)
+                .padding([12.0, 8.0])
                 .style(lpm_nav_settings_move_button_style)
                 .on_press(Message::OpenProgramUpdateRelease),
                 button(
-                    container(text("다음에 하기").size(11))
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .align_x(iced::alignment::Horizontal::Center)
-                        .align_y(iced::alignment::Vertical::Center),
+                    container(
+                        text(self.catalog("lpm.update.notice.later"))
+                            .size(13)
+                            .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
+                            .align_x(iced::alignment::Horizontal::Center)
+                    )
+                    .width(Length::Fill)
+                    .align_x(iced::alignment::Horizontal::Center),
                 )
-                .width(Length::Fixed(96.0))
-                .height(Length::Fixed(28.0))
-                .padding(0.0)
+                .width(Length::Fill)
+                .height(Length::Shrink)
+                .padding([12.0, 8.0])
                 .style(lpm_nav_settings_move_button_style)
                 .on_press(Message::DismissProgramUpdateNotice),
             ]
+            .width(Length::Fill)
             .spacing(12)
             .align_y(iced::Alignment::Center),
         ]
-        .spacing(10)
+        .spacing(16)
         .width(Length::Fill)
         .align_x(iced::Alignment::Center),
     )
-    .width(Length::Fixed(260.0))
-    .height(Length::Fixed(150.0))
-    .padding([18.0, 20.0])
+    .width(Length::Fill)
+    .max_width(560.0)
+    .height(Length::Shrink)
+    .padding([28.0, 30.0])
     .style(lpm_nav_dashboard_update_popup_card_style);
 
     let scrim = container(iced::widget::Space::new())
@@ -9708,6 +10391,7 @@ fn dashboard_update_notice_view(&self) -> Element<'_, Message> {
     let centered = container(popup_content)
         .width(Length::Fill)
         .height(Length::Fill)
+        .padding(20.0)
         .align_x(iced::alignment::Horizontal::Center)
         .align_y(iced::alignment::Vertical::Center);
 
@@ -9719,12 +10403,60 @@ fn dashboard_update_notice_view(&self) -> Element<'_, Message> {
     .into()
 }
 
+fn startup_disclaimer_dialog(&self) -> Element<'_, Message> {
+    let checked = self.startup_disclaimer_checked;
+    let confirm = shell_action(self.catalog("lpm.disclaimer.continue"),
+        Message::DisclaimerConfirm, checked, true);
+    let content = container(column![
+        text(self.catalog("lpm.disclaimer.title")).size(22).font(lpm_bold_font()),
+        shell_muted(self.catalog("lpm.disclaimer.body"), 14)
+            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+        iced::widget::checkbox(checked)
+            .label(self.catalog("lpm.disclaimer.accept"))
+            .on_toggle(Message::DisclaimerToggled)
+            .size(20),
+        row![
+            Space::new().width(Length::Fill),
+            shell_action(self.catalog("lpm.disclaimer.exit"), Message::DisclaimerExit, true, false),
+            confirm
+        ].spacing(12).align_y(iced::Alignment::Center)
+    ].spacing(20).width(Length::Fill))
+        .padding(24).width(Length::Fixed(475.0)).style(shell_panel_style);
+    let scrim = container(Space::new())
+        .width(Length::Fill).height(Length::Fill)
+        .style(lpm_nav_rom_country_popup_scrim_style);
+    let centered = container(content).width(Length::Fill).height(Length::Fill)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center);
+    iced::widget::opaque(iced::widget::Stack::with_children(vec![scrim.into(),centered.into()])
+        .width(Length::Fill).height(Length::Fill)).into()
+}
+
 fn rom_country_popup_view(&self) -> Element<'_, Message> {
-    let selected_code = self.rom_option_country_code.as_deref();
+    let selected_code = self.rom_country_draft.as_deref();
     let search = self.rom_country_code_search.trim().to_ascii_lowercase();
     let mut list = column![].spacing(2);
     let mut matched_count = 0usize;
 
+    if search.is_empty() && !self.additional_country_reset_pending {
+        let skipped = self.rom_country_skip_draft;
+        list = list.push(button(row![
+            text(if self.rom_country_skip_draft { "◉" } else { "○" }).size(18),
+            text(self.catalog("lpm.country.skip")).size(13).width(Length::Fill)
+        ].spacing(12).align_y(iced::Alignment::Center))
+            .width(Length::Fill).padding([10, 16])
+            .on_press(Message::RomCountrySkip)
+            .style(move |theme: &Theme, status| {
+                let c = shell_colors(theme);
+                button::Style {
+                    background: Some(Background::Color(if skipped { c.tint }
+                        else if matches!(status, button::Status::Hovered) { c.row }
+                        else { c.panel })),
+                    text_color: c.text,
+                    ..button::Style::default()
+                }
+            }));
+    }
     for (index, entry) in ROM_COUNTRY_CODES.iter().enumerate() {
         let entry_code = entry.code.to_ascii_lowercase();
         let localized_name = localized_country_name(index, self.settings_language);
@@ -9738,28 +10470,41 @@ fn rom_country_popup_view(&self) -> Element<'_, Message> {
 
         let selected = selected_code == Some(entry.code);
         let code = entry.code.to_string();
-        let label = format!("{} — {}", entry.code, localized_name);
 
+        let flag: Element<'_, Message> = if let Some(svg) = country_flags::svg(entry.code) {
+            iced::widget::svg(iced::widget::svg::Handle::from_memory(svg))
+                .width(Length::Fixed(25.0)).height(Length::Fixed(17.0)).into()
+        } else {
+            text("🌐").size(16).into()
+        };
+        let radio = if selected { "◉" } else { "○" };
         list = list.push(
-            button(text(label).size(13))
-                .padding([6.0, 14.0])
+            button(row![
+                text(radio).size(18),
+                flag,
+                text(entry.code).size(12).width(Length::Fixed(30.0)),
+                text(localized_name).size(13).width(Length::Fill)
+                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+            ].spacing(11).align_y(iced::Alignment::Center))
+                .padding([9.0, 14.0])
                 .width(Length::Fill)
-                .on_press(Message::RomSelectCountry(code))
-                .style(move |_theme: &Theme, status| {
+                .on_press(Message::RomCountryStage(code))
+                .style(move |theme: &Theme, status| {
                     let hovered = matches!(status, iced::widget::button::Status::Hovered);
+                    let colors = lpm_shell_palette(theme);
 
                     iced::widget::button::Style {
                         background: if selected {
-                            Some(Background::Color(Color::from_rgb8(73, 89, 255)))
+                            Some(Background::Color(colors.accent))
                         } else if hovered {
-                            Some(Background::Color(Color::from_rgb8(239, 241, 250)))
+                            Some(Background::Color(colors.subtle))
                         } else {
                             None
                         },
                         text_color: if selected {
-                            Color::from_rgb8(255, 255, 255)
+                            Color::WHITE
                         } else {
-                            Color::from_rgb8(32, 35, 47)
+                            colors.text
                         },
                         border: iced::Border {
                             radius: 8.0.into(),
@@ -9793,18 +10538,12 @@ fn rom_country_popup_view(&self) -> Element<'_, Message> {
 
     let popup_content = container(
         column![
-            row![
-                text("국가 코드 변경")
-                    .size(16)
-                    .font(lpm_bold_font()),
-                iced::widget::Space::new()
-                    .width(Length::Fill)
-                    .height(Length::Fixed(1.0)),
-                button(text("취소").size(12))
-                    .on_press(Message::RomCloseCountryPopup),
-            ]
-            .spacing(8)
-            .align_y(iced::Alignment::Center),
+            text(self.catalog("lpm.country.dialog.title"))
+                .size(20).font(lpm_bold_font()).width(Length::Fill)
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+            shell_muted(self.catalog("lpm.country.dialog.subtitle"), 12)
+                .width(Length::Fill)
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
             search_input,
             container(iced::widget::Space::new())
                 .width(Length::Fill)
@@ -9812,11 +10551,21 @@ fn rom_country_popup_view(&self) -> Element<'_, Message> {
                 .style(lpm_nav_divider_style),
             scrollable(list)
                 .width(Length::Fill)
-                .height(Length::Fixed(300.0)),
+                .height(Length::Fixed(285.0)),
+            container(iced::widget::Space::new()).width(Length::Fill)
+                .height(Length::Fixed(1.0)).style(shell_divider_style),
+            row![
+                shell_muted(format!("{}: {}", self.catalog("lpm.country.count"), matched_count), 12)
+                    .width(Length::Fill),
+                self.gbst_modal_action(self.catalog("common.cancel"), Message::RomCloseCountryPopup,
+                    true, false),
+                self.gbst_modal_action(self.catalog("lpm.country.confirm"), Message::RomCountryConfirm,
+                    selected_code.is_some() || (self.rom_country_skip_draft && !self.additional_country_reset_pending), true),
+            ].spacing(8).align_y(iced::Alignment::Center),
         ]
-        .spacing(10),
+        .spacing(12),
     )
-    .width(Length::Fixed(420.0))
+    .width(Length::Fixed(440.0))
     .padding(20)
     .style(lpm_nav_rom_country_popup_card_style);
 
@@ -10048,6 +10797,8 @@ fn rom_routine_slide_row(
         RomSlideTarget::Update => self.rom_update_slide_width,
         RomSlideTarget::Reinstall => self.rom_reinstall_slide_width,
     };
+    let card_width = lpm_rom_card_width(self.window_size.0, self.gbst_sidebar_width());
+    let card_height = lpm_rom_card_height(active_language_option());
 
     let any_progress = (slide_width / ROM_ROUTINE_EXPAND_WIDTH).clamp(0.0, 1.0);
 
@@ -10070,10 +10821,10 @@ fn rom_routine_slide_row(
         iced_text(title)
             .size(lpm_routine_title_size())
             .font(lpm_bold_font())
-            .wrapping(iced::widget::text::Wrapping::Word),
+            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
         iced_text(description)
             .size(lpm_routine_body_size())
-            .wrapping(iced::widget::text::Wrapping::Word),
+            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
     ]
     .spacing(4)
     .width(Length::Fill);
@@ -10121,19 +10872,19 @@ let slide_clip: Element<'static, Message> = if slide_width > 0.5 {
         iced_text(slide_title)
             .size(lpm_slide_title_size())
             .font(lpm_bold_font())
-            .wrapping(iced::widget::text::Wrapping::Word),
+            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
         iced_text(slide_line_1)
             .size(lpm_slide_body_size())
-            .wrapping(iced::widget::text::Wrapping::Word),
+            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
         iced_text(slide_line_2)
             .size(lpm_slide_body_size())
-            .wrapping(iced::widget::text::Wrapping::Word),
+            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
         iced_text(slide_line_3)
             .size(lpm_slide_body_size())
-            .wrapping(iced::widget::text::Wrapping::Word),
+            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
     ]
     .spacing(2)
-    .width(Length::Fixed(ROM_ROUTINE_SLIDE_TEXT_WIDTH));
+    .width(Length::Fill);
 
     let slide_warning_icon = container(
         iced::widget::image(slide_icon_handle)
@@ -10152,35 +10903,39 @@ let slide_clip: Element<'static, Message> = if slide_width > 0.5 {
     )
     .width(Length::Fixed(ROM_ROUTINE_EXPAND_WIDTH))
     .height(Length::Fill)
-    .padding(12)
+    .padding([10.0, 8.0])
     .style(lpm_nav_rom_routine_slide_style);
 
     container(slide_content_fixed)
         .width(Length::Fixed(slide_width))
-        .height(Length::Fixed(ROM_ROUTINE_CARD_HEIGHT))
+        .height(Length::Fixed(card_height))
         .clip(true)
         .into()
 } else {
     iced::widget::Space::new()
         .width(Length::Fixed(0.0))
-        .height(Length::Fixed(ROM_ROUTINE_CARD_HEIGHT))
+        .height(Length::Fixed(card_height))
         .into()
 };
 
+// Fill the entire card edge at every locale-dependent height; the previous
+// fixed 86px PNG left empty bands when the translated card grew to 148px.
 let slide_handle_area = container(
-    iced::widget::image(self.slide_button_handle.clone())
-        .width(Length::Fixed(ROM_ROUTINE_HANDLE_WIDTH))
-        .height(Length::Fixed(ROM_ROUTINE_HANDLE_HEIGHT)),
+    text("›").size(38).font(lpm_bold_font())
+        .style(|_theme: &Theme| iced::widget::text::Style {
+            color: Some(Color::WHITE),
+        }),
 )
 .width(Length::Fixed(ROM_ROUTINE_HANDLE_WIDTH))
-.height(Length::Fill)
+.height(Length::Fixed(card_height))
 .padding(0)
 .align_x(iced::alignment::Horizontal::Center)
-.align_y(iced::alignment::Vertical::Center);
+.align_y(iced::alignment::Vertical::Center)
+.style(lpm_nav_rom_chevron_accent_style);
 
 let slide_overlay_content = row![slide_clip, slide_handle_area]
     .spacing(0)
-    .height(Length::Fixed(ROM_ROUTINE_CARD_HEIGHT))
+    .height(Length::Fixed(card_height))
     .align_y(iced::Alignment::Center);
 
 let slide_overlay = container(slide_overlay_content)
@@ -10204,13 +10959,13 @@ let slide_overlay = container(slide_overlay_content)
     stack_children.push(slide_overlay.into());
 
     let stacked = iced::widget::Stack::with_children(stack_children)
-        .width(Length::Fixed(ROM_ROUTINE_CARD_WIDTH))
-        .height(Length::Fixed(ROM_ROUTINE_CARD_HEIGHT));
+        .width(Length::Fixed(card_width))
+        .height(Length::Fixed(card_height));
 
 let mut card_button = button(stacked)
     .padding(0)
-    .width(Length::Fixed(ROM_ROUTINE_CARD_WIDTH))
-    .height(Length::Fixed(ROM_ROUTINE_CARD_HEIGHT))
+    .width(Length::Fixed(card_width))
+    .height(Length::Fixed(card_height))
     .style(lpm_nav_rom_card_button_style);
 
 if !disabled {
@@ -10418,6 +11173,11 @@ fn return_to_rom_image_info_after_device_state_changed(
         self.spinner_tick = 0;
         self.last_spft_stage = None;
         self.active_log_flow = Some(RuntimeFlowKind::CountryReset);
+        self.runtime_last_flow = Some(RuntimeFlowKind::CountryReset);
+        self.runtime_started_at = Some(Instant::now());
+        self.runtime_finished_elapsed = None;
+        self.runtime_log_start_index = self.log_lines.len();
+        self.runtime_last_outcome = None;
         self.push_log(format!(
             "[국가 코드 재설정] 국가 코드 재설정 작업을 시작합니다: {selected_country_code}"
         ));
@@ -10561,6 +11321,9 @@ ProinfoLiveEvent::Log(message) => {
     }
 
     let flow_completed = is_runtime_flow_completion_log(&message);
+    if flow_completed {
+        self.runtime_last_outcome = Some(true);
+    }
 
     if message.contains("[완료]")
                 || message.contains("SPFlashToolV6 작업 완료")
@@ -10587,7 +11350,10 @@ ProinfoLiveEvent::Log(message) => {
         }
 
         ProinfoLiveEvent::Error(err) => {
-            let should_show_failure_guidance = self.active_log_flow.is_some();
+            self.runtime_last_outcome = Some(false);
+            // Firmware/DTBO/LK validation errors are not USB cable failures.
+            let should_show_failure_guidance = self.active_log_flow.is_some()
+                && error_is_usb_transport_related(&err);
 
             if is_usb_debugging_shell_error(&err) {
                 self.push_log("작업 오류: USB 디버깅 활성화 설정 후 다시 시도해주세요.");
@@ -10707,7 +11473,7 @@ ProinfoLiveEvent::Log(message) => {
             let message = format!(
                 "[SPFT] {} {}",
                 stage_label,
-                progress_bar(progress.percent)
+                spft_progress_label(progress.percent)
             );
 
             if let Some(index) = self.progress_line_indices.get(&key).copied() {
@@ -10744,7 +11510,7 @@ fn finalize_spft_stage(&mut self, stage: &str) {
     };
 
     let stage_label = spft_stage_label(stage);
-    let message = format!("[SPFT] {} {}", stage_label, progress_bar(100));
+    let message = format!("[SPFT] {} {}", stage_label, spft_progress_label(100));
 
     if let Some(line) = self.log_lines.get_mut(index) {
         line.timestamp = current_timestamp();
@@ -10910,25 +11676,13 @@ fn cleanup_external_processes_on_exit() {
 }
 
 fn ensure_block_firmware_rules_for_flow(tx: &mpsc::Sender<ProinfoLiveEvent>) -> bool {
-    let source = lpmbox_firmware::block_firmware_rules_url();
-    let _ = tx.send(ProinfoLiveEvent::Log(format!(
-        "[Image] 온라인 차단 펌웨어 규칙을 확인합니다: {source}"
-    )));
-
-    match lpmbox_firmware::refresh_block_firmware_rules() {
-        Ok(size) => {
-            let _ = tx.send(ProinfoLiveEvent::Log(format!(
-                "[Image] 온라인 차단 펌웨어 규칙 확인 완료: {size} bytes"
-            )));
-            true
-        }
-        Err(err) => {
-            let _ = tx.send(ProinfoLiveEvent::Error(format!(
-                "온라인 차단 펌웨어 규칙 확인 실패: {err}"
-            )));
-            false
-        }
-    }
+    // The v3.1.23 firmware-version deny list is disabled. Do not require an
+    // unrelated GitHub request to succeed before using local official ROMs.
+    // Model, platform, LK, scatter and partition guards remain enforced.
+    let _ = tx.send(ProinfoLiveEvent::Log(
+        "[Image] 펌웨어 버전 설치 금지 목록 조회를 생략합니다.          모델·플랫폼·LK 해시 검증은 계속 적용합니다.".to_string(),
+    ));
+    true
 }
 
 fn run_convert_wipe_flow(
@@ -10948,7 +11702,9 @@ fn run_convert_wipe_flow(
         "[1단계] ADB 기기 감지 및 기기 정보 확인".to_string(),
     ));
 
-    let device = match lpmbox_device::probe_adb_device_for_convert_wipe(|message| {
+    // Android 14 is allowed past ADB probe for supported MT6897/MT6835
+    // model pairs; validate model/region/platform before any device writes.
+    let device = match lpmbox_device::probe_adb_device_for_android14_supported_rom(|message| {
         let _ = tx.send(ProinfoLiveEvent::Log(message));
     }) {
         Ok(device) => device,
@@ -10959,6 +11715,7 @@ fn run_convert_wipe_flow(
             return;
         }
     };
+
 
         let _ = tx.send(ProinfoLiveEvent::Log(
             "[2단계] image 폴더 검사 및 플래싱 준비".to_string(),
@@ -10986,6 +11743,24 @@ fn run_convert_wipe_flow(
 
     let _ = tx.send(ProinfoLiveEvent::Log(route_message));
 
+    if device.android_major == Some(14) {
+        let _ = tx.send(ProinfoLiveEvent::Log(
+            "[ADB] Android 14 지원 모델 계열의 PRC/ROW 전환을 허용합니다.              LK·DTBO·scatter 검증 및 Fastboot 슬롯 A 검사는 계속 적용합니다.              AVB/rollback 정상 부팅 여부는 별도 검증이 필요합니다."
+                .to_string()
+        ));
+    }
+
+    if let Err(err)=lpmbox_firmware::flash_plan::preflight_lk_before_device_changes(
+        &image_dir,&firmware.model,firmware.region,
+        firmware.version.as_deref(),InstallMode::ConvertWipe,
+        &mut |message|{ let _=tx.send(ProinfoLiveEvent::Log(message)); },
+    ){
+        let _=tx.send(ProinfoLiveEvent::Error(format!(
+            "[LK 사전검사] 국가 코드 변경·기기 재부팅·플래싱 전에 설치를 중단했습니다: {err}"
+        )));
+        return;
+    }
+
     let country_code = selected_country_code
         .as_deref()
         .map(str::trim)
@@ -10999,21 +11774,47 @@ fn run_convert_wipe_flow(
         remove_spft_log_folder_after_proinfo_backup(&tx);
     }
 
+    // New v3.1.24 step: live active-slot LK readback for TB375FC -> TB373FU
+    // ROW 084+ only. The original proinfo backup and Flash Plan ordering remain.
+    let active_lk_readback = match rom_lk::backup_running_lk_if_required(
+        &image_dir, &firmware, &tx
+    ) {
+        Ok(path) => path,
+        Err(err) => {
+            let _ = tx.send(ProinfoLiveEvent::Error(format!(
+                "활성 슬롯 LK 백업 실패, 플래싱 중단: {err}"
+            )));
+            return;
+        }
+    };
+
     let _ = tx.send(ProinfoLiveEvent::Log(
         "[3단계] Flash Plan 준비 및 작업용 scatter/xml 생성".to_string(),
     ));
 
-    let output = match lpmbox_firmware::prepare_flash_plan_with_country_code_log(
-        &image_dir,
-        InstallMode::ConvertWipe,
-        country_code,
-        |message| {
-            let _ = tx.send(ProinfoLiveEvent::Log(message));
-        },
-    ) {
+    let output_result = if let Some(lk_dump) = active_lk_readback.as_deref() {
+        lpmbox_firmware::prepare_flash_plan_with_active_lk_log(
+            &image_dir, InstallMode::ConvertWipe, country_code, lk_dump,
+            |message| { let _ = tx.send(ProinfoLiveEvent::Log(message)); },
+        )
+    } else {
+        lpmbox_firmware::prepare_flash_plan_with_country_code_log(
+            &image_dir, InstallMode::ConvertWipe, country_code,
+            |message| { let _ = tx.send(ProinfoLiveEvent::Log(message)); },
+        )
+    };
+    let output = match output_result {
         Ok(output) => output,
         Err(err) => {
-            let _ = tx.send(ProinfoLiveEvent::Error(format!("플래싱 준비 실패: {err}")));
+            let message=err.to_string();
+            if message.contains("MT6835 전용으로 실제 부팅/서명이 검증된 LK 패치")
+                || message.contains("모델별 LK 패치 필수") {
+                let _=tx.send(ProinfoLiveEvent::Log(
+                    "[LK 안전성 차단] image 폴더와 ADB 연결은 확인되었습니다.                     연결 기기의 모델과 펌웨어에 대한 부팅·서명 검증 LK 패치가 없어                     Flash Plan 생성을 중단했습니다. 다른 칩셋의 LK를 사용하거나                     검증을 생략하지 않습니다.".into()
+                ));
+            }
+            let _ = tx.send(ProinfoLiveEvent::Error(
+                format!("플래싱 준비 실패: {message}")));
             return;
         }
     };
@@ -11026,9 +11827,10 @@ fn run_convert_wipe_flow(
         "[4단계] current slot A 설정".to_string(),
     ));
 
-    if let Err(err) = lpmbox_device::run_current_slot_a_stage(|message| {
+    let mut slot_route = lpmbox_device::SlotAStageRoute::AlreadyA;
+    if let Err(err) = lpmbox_device::run_current_slot_a_stage_v2(|message| {
         let _ = tx.send(ProinfoLiveEvent::Log(message));
-    }) {
+    }).map(|route| { slot_route = route; }) {
         let err_text = err.to_string();
 
         if err_text.contains("Fastboot 기기 감지 실패")
@@ -11050,6 +11852,16 @@ fn run_convert_wipe_flow(
         "[5단계] ROM 설치".to_string(),
     ));
 
+    if slot_route == lpmbox_device::SlotAStageRoute::AlreadyA {
+    // Arm the high-frequency Windows PreLoader watcher BEFORE adb reboot.
+    // This watches concurrently while the existing reboot/fallback steps run.
+    let preloader_watch = lpmbox_device::PreloaderWatch::start(30);
+    if !preloader_watch.is_armed() {
+        let _ = tx.send(ProinfoLiveEvent::Error(
+            "PreLoader 감시 초기화 실패: USB/COM 감시가 준비되지 않아 안전을 위해 재부팅을 취소합니다.".to_string()
+        ));
+        return ;
+    }
     lpmbox_device::trigger_rom_install_reboot_commands(|message| {
         let _ = tx.send(ProinfoLiveEvent::Log(message));
     });
@@ -11062,9 +11874,23 @@ fn run_convert_wipe_flow(
         internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 중... │"),
     ));
 
-    let detect = lpmbox_device::detect_preloader_until_timeout(30);
+    let detect = preloader_watch.wait();
+    if detect.detected {
+        let _ = tx.send(ProinfoLiveEvent::Log(format!(
+            "[Port] 실기기 PreLoader 감지: {} / {}",
+            detect.display_name.as_deref().unwrap_or("COM 포트 확인"),
+            detect.method.as_deref().unwrap_or("Windows SetupAPI")
+        )));
+    }
 
     if !detect.detected {
+        let _ = tx.send(ProinfoLiveEvent::Log(format!(
+            "[Port] PreLoader 검사 상세: {}",
+            detect.method.as_deref().unwrap_or("활성 PreLoader COM 미발견")
+        )));
+        let _ = tx.send(ProinfoLiveEvent::Log(
+            "[안내] Android 재부팅에서 PreLoader USB가 나타나지 않는 기기는 전원을 완전히 끈 뒤 USB를 다시 연결해야 할 수 있습니다. 플래싱은 시작되지 않았습니다.".to_string()
+        ));
         let _ = tx.send(ProinfoLiveEvent::Error(format!(
             "PreLoader 포트 감지 실패: 30초 안에 MediaTek PreLoader USB VCOM 포트를 찾지 못했습니다. 감지 문자열: {}",
             detect.checked_tokens.join(" / ")
@@ -11075,6 +11901,11 @@ fn run_convert_wipe_flow(
     let _ = tx.send(ProinfoLiveEvent::Log(
         internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 완료"),
     ));
+    } else {
+        let _ = tx.send(ProinfoLiveEvent::Log(
+            "[PreLoader] 4회 출현 완료, ADB 미연결 확인. 추가 재부팅/사후 슬롯 조회 없이 SPFlashToolV6 실행".to_string(),
+        ));
+    }
 
     let _ = tx.send(ProinfoLiveEvent::Log(
         "[7단계] SPFlashToolV6 ROM 설치".to_string(),
@@ -11087,7 +11918,7 @@ fn run_convert_wipe_flow(
     match result {
         Ok(()) => {
             let _ = tx.send(ProinfoLiveEvent::Log(
-                "[완료] 1번 옵션 PRC/ROW 펌웨어 설치 작업이 완료되었습니다.".to_string(),
+                PRC_ROW_INSTALL_COMPLETE_LOG.to_string(),
             ));
         }
         Err(err) => {
@@ -11115,7 +11946,7 @@ fn run_row_update_keep_data_flow(
         "[1단계] ADB 기기 감지 및 기기 정보 확인".to_string(),
     ));
 
-    let device = match lpmbox_device::probe_adb_device_for_convert_wipe(|message| {
+    let device = match lpmbox_device::probe_adb_device_for_android14_supported_rom(|message| {
         let _ = tx.send(ProinfoLiveEvent::Log(message));
     }) {
         Ok(device) => device,
@@ -11126,6 +11957,7 @@ fn run_row_update_keep_data_flow(
             return;
         }
     };
+
 
     let _ = tx.send(ProinfoLiveEvent::Log(
         "[2단계] image 폴더 기본 검사".to_string(),
@@ -11149,6 +11981,17 @@ fn run_row_update_keep_data_flow(
 
     let _ = tx.send(ProinfoLiveEvent::Log(route_message));
 
+    if let Err(err)=lpmbox_firmware::flash_plan::preflight_lk_before_device_changes(
+        &image_dir,&firmware.model,firmware.region,
+        firmware.version.as_deref(),InstallMode::RowUpdateKeepData,
+        &mut |message|{ let _=tx.send(ProinfoLiveEvent::Log(message)); },
+    ){
+        let _=tx.send(ProinfoLiveEvent::Error(format!(
+            "[LK 사전검사] 국가 코드 변경·기기 재부팅·플래싱 전에 설치를 중단했습니다: {err}"
+        )));
+        return;
+    }
+
     let country_code = selected_country_code
         .as_deref()
         .map(str::trim)
@@ -11162,21 +12005,47 @@ fn run_row_update_keep_data_flow(
         remove_spft_log_folder_after_proinfo_backup(&tx);
     }
 
+    // New v3.1.24 step: live active-slot LK readback for TB375FC -> TB373FU
+    // ROW 084+ only. The original proinfo backup and Flash Plan ordering remain.
+    let active_lk_readback = match rom_lk::backup_running_lk_if_required(
+        &image_dir, &firmware, &tx
+    ) {
+        Ok(path) => path,
+        Err(err) => {
+            let _ = tx.send(ProinfoLiveEvent::Error(format!(
+                "활성 슬롯 LK 백업 실패, 플래싱 중단: {err}"
+            )));
+            return;
+        }
+    };
+
     let _ = tx.send(ProinfoLiveEvent::Log(
         "[3단계] Flash Plan 준비 및 작업용 scatter/xml 생성".to_string(),
     ));
 
-    let output = match lpmbox_firmware::prepare_flash_plan_with_country_code_log(
-        &image_dir,
-        InstallMode::RowUpdateKeepData,
-        country_code,
-        |message| {
-            let _ = tx.send(ProinfoLiveEvent::Log(message));
-        },
-    ) {
+    let output_result = if let Some(lk_dump) = active_lk_readback.as_deref() {
+        lpmbox_firmware::prepare_flash_plan_with_active_lk_log(
+            &image_dir, InstallMode::RowUpdateKeepData, country_code, lk_dump,
+            |message| { let _ = tx.send(ProinfoLiveEvent::Log(message)); },
+        )
+    } else {
+        lpmbox_firmware::prepare_flash_plan_with_country_code_log(
+            &image_dir, InstallMode::RowUpdateKeepData, country_code,
+            |message| { let _ = tx.send(ProinfoLiveEvent::Log(message)); },
+        )
+    };
+    let output = match output_result {
         Ok(output) => output,
         Err(err) => {
-            let _ = tx.send(ProinfoLiveEvent::Error(format!("플래싱 준비 실패: {err}")));
+            let message=err.to_string();
+            if message.contains("MT6835 전용으로 실제 부팅/서명이 검증된 LK 패치")
+                || message.contains("모델별 LK 패치 필수") {
+                let _=tx.send(ProinfoLiveEvent::Log(
+                    "[LK 안전성 차단] image 폴더와 ADB 연결은 확인되었습니다.                     연결 기기의 모델과 펌웨어에 대한 부팅·서명 검증 LK 패치가 없어                     Flash Plan 생성을 중단했습니다. 다른 칩셋의 LK를 사용하거나                     검증을 생략하지 않습니다.".into()
+                ));
+            }
+            let _ = tx.send(ProinfoLiveEvent::Error(
+                format!("플래싱 준비 실패: {message}")));
             return;
         }
     };
@@ -11189,9 +12058,10 @@ fn run_row_update_keep_data_flow(
         "[4단계] current slot A 설정".to_string(),
     ));
 
-    if let Err(err) = lpmbox_device::run_current_slot_a_stage(|message| {
+    let mut slot_route = lpmbox_device::SlotAStageRoute::AlreadyA;
+    if let Err(err) = lpmbox_device::run_current_slot_a_stage_v2(|message| {
         let _ = tx.send(ProinfoLiveEvent::Log(message));
-    }) {
+    }).map(|route| { slot_route = route; }) {
         let err_text = err.to_string();
 
         if err_text.contains("Fastboot 기기 감지 실패")
@@ -11211,6 +12081,16 @@ fn run_row_update_keep_data_flow(
 
     let _ = tx.send(ProinfoLiveEvent::Log("[5단계] ROM 설치".to_string()));
 
+    if slot_route == lpmbox_device::SlotAStageRoute::AlreadyA {
+    // Arm the high-frequency Windows PreLoader watcher BEFORE adb reboot.
+    // This watches concurrently while the existing reboot/fallback steps run.
+    let preloader_watch = lpmbox_device::PreloaderWatch::start(30);
+    if !preloader_watch.is_armed() {
+        let _ = tx.send(ProinfoLiveEvent::Error(
+            "PreLoader 감시 초기화 실패: USB/COM 감시가 준비되지 않아 안전을 위해 재부팅을 취소합니다.".to_string()
+        ));
+        return ;
+    }
     lpmbox_device::trigger_rom_install_reboot_commands(|message| {
         let _ = tx.send(ProinfoLiveEvent::Log(message));
     });
@@ -11223,9 +12103,23 @@ fn run_row_update_keep_data_flow(
         internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 중... │"),
     ));
 
-    let detect = lpmbox_device::detect_preloader_until_timeout(30);
+    let detect = preloader_watch.wait();
+    if detect.detected {
+        let _ = tx.send(ProinfoLiveEvent::Log(format!(
+            "[Port] 실기기 PreLoader 감지: {} / {}",
+            detect.display_name.as_deref().unwrap_or("COM 포트 확인"),
+            detect.method.as_deref().unwrap_or("Windows SetupAPI")
+        )));
+    }
 
     if !detect.detected {
+        let _ = tx.send(ProinfoLiveEvent::Log(format!(
+            "[Port] PreLoader 검사 상세: {}",
+            detect.method.as_deref().unwrap_or("활성 PreLoader COM 미발견")
+        )));
+        let _ = tx.send(ProinfoLiveEvent::Log(
+            "[안내] Android 재부팅에서 PreLoader USB가 나타나지 않는 기기는 전원을 완전히 끈 뒤 USB를 다시 연결해야 할 수 있습니다. 플래싱은 시작되지 않았습니다.".to_string()
+        ));
         let _ = tx.send(ProinfoLiveEvent::Error(format!(
             "PreLoader 포트 감지 실패: 30초 안에 MediaTek PreLoader USB VCOM 포트를 찾지 못했습니다. 감지 문자열: {}",
             detect.checked_tokens.join(" / ")
@@ -11236,6 +12130,11 @@ fn run_row_update_keep_data_flow(
     let _ = tx.send(ProinfoLiveEvent::Log(
         internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 완료"),
     ));
+    } else {
+        let _ = tx.send(ProinfoLiveEvent::Log(
+            "[PreLoader] 4회 출현 완료, ADB 미연결 확인. 추가 재부팅/사후 슬롯 조회 없이 SPFlashToolV6 실행".to_string(),
+        ));
+    }
 
     let _ = tx.send(ProinfoLiveEvent::Log(
         "[7단계] SPFlashToolV6 ROM 설치".to_string(),
@@ -11248,8 +12147,7 @@ fn run_row_update_keep_data_flow(
     match result {
         Ok(()) => {
             let _ = tx.send(ProinfoLiveEvent::Log(
-                "[완료] 2번 옵션 ROW(글로벌) 펌웨어 업데이트 [데이터 유지] 작업이 완료되었습니다."
-                    .to_string(),
+                ROW_KEEP_DATA_COMPLETE_LOG.to_string(),
             ));
         }
         Err(err) => {
@@ -11321,6 +12219,17 @@ fn run_reinstall_wipe_flow(image_dir: PathBuf, tx: mpsc::Sender<ProinfoLiveEvent
         return;
     }
 
+    if let Err(err)=lpmbox_firmware::flash_plan::preflight_lk_before_device_changes(
+        &image_dir,&firmware.model,firmware.region,
+        firmware.version.as_deref(),InstallMode::ReinstallWipe,
+        &mut |message|{ let _=tx.send(ProinfoLiveEvent::Log(message)); },
+    ){
+        let _=tx.send(ProinfoLiveEvent::Error(format!(
+            "[LK 사전검사] 국가 코드 변경·기기 재부팅·플래싱 전에 설치를 중단했습니다: {err}"
+        )));
+        return;
+    }
+
     let _ = tx.send(ProinfoLiveEvent::Log(
         "[4단계] 기기 복구 준비".to_string(),
     ));
@@ -11335,6 +12244,9 @@ fn run_reinstall_wipe_flow(image_dir: PathBuf, tx: mpsc::Sender<ProinfoLiveEvent
 
     let _ = tx.send(ProinfoLiveEvent::Log(
         "[5단계] Flash Plan 준비 및 작업용 scatter/xml 생성".to_string(),
+    ));
+    let _ = tx.send(ProinfoLiveEvent::Log(
+        "[Recovery LK] 일반 ROM 설치와 동일한 모델·지역·버전별 LK 패치 정책을 적용합니다.".to_string(),
     ));
 
     let output = match lpmbox_firmware::prepare_flash_plan_with_log(
@@ -11363,6 +12275,15 @@ fn run_reinstall_wipe_flow(image_dir: PathBuf, tx: mpsc::Sender<ProinfoLiveEvent
         "[6단계] MediaTek PreLoader 포트 감지 (제한 시간 30초)".to_string(),
     ));
 
+    // Arm the high-frequency Windows PreLoader watcher BEFORE adb reboot.
+    // This watches concurrently while the existing reboot/fallback steps run.
+    let preloader_watch = lpmbox_device::PreloaderWatch::start(30);
+    if !preloader_watch.is_armed() {
+        let _ = tx.send(ProinfoLiveEvent::Error(
+            "PreLoader 감시 초기화 실패: USB/COM 감시가 준비되지 않아 안전을 위해 재부팅을 취소합니다.".to_string()
+        ));
+        return ;
+    }
     lpmbox_device::trigger_rom_install_reboot_commands(|message| {
         let _ = tx.send(ProinfoLiveEvent::Log(message));
     });
@@ -11371,9 +12292,23 @@ fn run_reinstall_wipe_flow(image_dir: PathBuf, tx: mpsc::Sender<ProinfoLiveEvent
         internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 중... (30초) │"),
     ));
 
-    let detect = lpmbox_device::detect_preloader_until_timeout(30);
+    let detect = preloader_watch.wait();
+    if detect.detected {
+        let _ = tx.send(ProinfoLiveEvent::Log(format!(
+            "[Port] 실기기 PreLoader 감지: {} / {}",
+            detect.display_name.as_deref().unwrap_or("COM 포트 확인"),
+            detect.method.as_deref().unwrap_or("Windows SetupAPI")
+        )));
+    }
 
     if !detect.detected {
+        let _ = tx.send(ProinfoLiveEvent::Log(format!(
+            "[Port] PreLoader 검사 상세: {}",
+            detect.method.as_deref().unwrap_or("활성 PreLoader COM 미발견")
+        )));
+        let _ = tx.send(ProinfoLiveEvent::Log(
+            "[안내] Android 재부팅에서 PreLoader USB가 나타나지 않는 기기는 전원을 완전히 끈 뒤 USB를 다시 연결해야 할 수 있습니다. 플래싱은 시작되지 않았습니다.".to_string()
+        ));
         let _ = tx.send(ProinfoLiveEvent::Error(format!(
             "PreLoader 포트 감지 실패: 30초 안에 MediaTek PreLoader USB VCOM 포트를 찾지 못했습니다. 감지 문자열: {}",
             detect.checked_tokens.join(" / ")
@@ -11552,6 +12487,15 @@ fn run_country_reset_flow(
         "[6단계] 수정한 proinfo 플래싱용 재부팅".to_string(),
     ));
 
+    // Arm the high-frequency Windows PreLoader watcher BEFORE adb reboot.
+    // This watches concurrently while the existing reboot/fallback steps run.
+    let preloader_watch = lpmbox_device::PreloaderWatch::start(30);
+    if !preloader_watch.is_armed() {
+        let _ = tx.send(ProinfoLiveEvent::Error(
+            "PreLoader 감시 초기화 실패: USB/COM 감시가 준비되지 않아 안전을 위해 재부팅을 취소합니다.".to_string()
+        ));
+        return ;
+    }
     lpmbox_device::trigger_rom_install_reboot_commands(|message| {
         let _ = tx.send(ProinfoLiveEvent::Log(message));
     });
@@ -11564,9 +12508,23 @@ fn run_country_reset_flow(
         internal_spinner_message("country_reset_preloader_detect", "[Port] PreLoader 포트 감지 중... (30초) │"),
     ));
 
-    let detect = lpmbox_device::detect_preloader_until_timeout(30);
+    let detect = preloader_watch.wait();
+    if detect.detected {
+        let _ = tx.send(ProinfoLiveEvent::Log(format!(
+            "[Port] 실기기 PreLoader 감지: {} / {}",
+            detect.display_name.as_deref().unwrap_or("COM 포트 확인"),
+            detect.method.as_deref().unwrap_or("Windows SetupAPI")
+        )));
+    }
 
     if !detect.detected {
+        let _ = tx.send(ProinfoLiveEvent::Log(format!(
+            "[Port] PreLoader 검사 상세: {}",
+            detect.method.as_deref().unwrap_or("활성 PreLoader COM 미발견")
+        )));
+        let _ = tx.send(ProinfoLiveEvent::Log(
+            "[안내] Android 재부팅에서 PreLoader USB가 나타나지 않는 기기는 전원을 완전히 끈 뒤 USB를 다시 연결해야 할 수 있습니다. 플래싱은 시작되지 않았습니다.".to_string()
+        ));
         let _ = tx.send(ProinfoLiveEvent::Error(format!(
             "PreLoader 포트 감지 실패: 30초 안에 MediaTek PreLoader USB VCOM 포트를 찾지 못했습니다. 감지 문자열: {}",
             detect.checked_tokens.join(" / ")
@@ -11737,6 +12695,30 @@ fn run_optional_country_proinfo_backup(
         "[backup] 국가 코드 변경을 위해 proinfo 파티션을 백업합니다.".to_string(),
     ));
 
+    // Pre-arm the original READ-PARTITION proinfo command while Android is
+    // still up, so SPFT is already waiting when PreLoader briefly appears.
+    let prearmed_readback = match lpmbox_spft::PrearmedProinfoReadback::start(image_dir) {
+        Ok(task) => task,
+        Err(err) => {
+            let _ = tx.send(ProinfoLiveEvent::Error(format!(
+                "[backup] SP Flash Tool 사전 대기 실패: {err}"
+            )));
+            return false;
+        }
+    };
+    let _ = tx.send(ProinfoLiveEvent::Log(
+        "[backup] SP Flash Tool V6 proinfo 읽기 준비 완료: USB PreLoader 연결 대기 중".to_string()
+    ));
+    // Arm the high-frequency Windows PreLoader watcher BEFORE adb reboot.
+    // This watches concurrently while the existing reboot/fallback steps run.
+    let preloader_watch = lpmbox_device::PreloaderWatch::start(30);
+    if !preloader_watch.is_armed() {
+        prearmed_readback.cancel();
+        let _ = tx.send(ProinfoLiveEvent::Error(
+            "PreLoader 감시 초기화 실패: USB/COM 감시가 준비되지 않아 안전을 위해 재부팅을 취소합니다.".to_string()
+        ));
+        return false;
+    }
     lpmbox_device::trigger_rom_install_reboot_commands(|message| {
         let _ = tx.send(ProinfoLiveEvent::Log(message));
     });
@@ -11745,9 +12727,24 @@ fn run_optional_country_proinfo_backup(
         internal_spinner_message("backup_preloader_detect", "[backup] PreLoader 포트 감지 중... │"),
     ));
 
-    let detect = lpmbox_device::detect_preloader_until_timeout(30);
+    let detect = preloader_watch.wait();
+    if detect.detected {
+        let _ = tx.send(ProinfoLiveEvent::Log(format!(
+            "[Port] 실기기 PreLoader 감지: {} / {}",
+            detect.display_name.as_deref().unwrap_or("COM 포트 확인"),
+            detect.method.as_deref().unwrap_or("Windows SetupAPI")
+        )));
+    }
 
     if !detect.detected {
+        prearmed_readback.cancel();
+        let _ = tx.send(ProinfoLiveEvent::Log(format!(
+            "[Port] PreLoader 검사 상세: {}",
+            detect.method.as_deref().unwrap_or("활성 PreLoader COM 미발견")
+        )));
+        let _ = tx.send(ProinfoLiveEvent::Log(
+            "[안내] Android 재부팅에서 PreLoader USB가 나타나지 않는 기기는 전원을 완전히 끈 뒤 USB를 다시 연결해야 할 수 있습니다. 플래싱은 시작되지 않았습니다.".to_string()
+        ));
         let _ = tx.send(ProinfoLiveEvent::Error(format!(
             "[backup] proinfo 백업 실패: 30초 안에 MediaTek PreLoader USB VCOM 포트를 찾지 못했습니다. 감지 문자열: {}",
             detect.checked_tokens.join(" / ")
@@ -11759,14 +12756,10 @@ fn run_optional_country_proinfo_backup(
         internal_spinner_message("backup_preloader_detect", "[backup] PreLoader 포트 감지 완료"),
     ));
 
-    let readback_result = lpmbox_spft::execute_proinfo_readback_streaming(image_dir, |event| {
+    let readback_result = prearmed_readback.finish(|event| {
         match event {
             ProinfoLiveEvent::Log(message) => {
-                if message.contains("DA 모드 진입 시작") {
-                    let _ = tx.send(ProinfoLiveEvent::Log(
-                        "[backup] DA 모드 진입 시작".to_string(),
-                    ));
-                }
+                let _ = tx.send(ProinfoLiveEvent::Log(format!("[backup] {message}")));
             }
 
             ProinfoLiveEvent::Progress(mut progress) => {
@@ -11784,13 +12777,6 @@ fn run_optional_country_proinfo_backup(
 
     try_kill_spflashtoolv6_for_file_unlock();
 
-    wait_with_backup_spinner(
-        tx,
-        "backup_file_unlock_wait",
-        "[backup] 안정성을 위해 5초 대기...",
-        5,
-    );
-
     let result = match readback_result {
         Ok(result) => result,
         Err(err) => {
@@ -11800,6 +12786,13 @@ fn run_optional_country_proinfo_backup(
             return false;
         }
     };
+
+    wait_with_backup_spinner(
+        tx,
+        "backup_file_unlock_wait",
+        "[backup] 백업 성공 후 파일 잠금 해제를 위해 5초 대기...",
+        5,
+    );
 
     if !result.proinfo_exists || result.proinfo_size == 0 {
         let _ = tx.send(ProinfoLiveEvent::Error(
@@ -12180,6 +13173,28 @@ fn is_same_or_convertible_lpmbox_model_pair(device_model: &str, image_model: &st
     )
 }
 
+// Android 14 is accepted for supported, matching MT6897/MT6835 device
+// families only; it does not bypass ROM region, LK, slot or signature guards.
+fn android14_supported_pair_allowed(
+    major: Option<u32>,
+    device_model: &str,
+    device_platform: &str,
+    image_model: &str,
+    image_platform: &str,
+) -> bool {
+    if major != Some(14) || !is_same_or_convertible_lpmbox_model_pair(device_model, image_model) {
+        return false;
+    }
+    let models = [device_model.to_ascii_uppercase(), image_model.to_ascii_uppercase()];
+    let mt6897 = models.iter().all(|m| matches!(m.as_str(), "TB375FC" | "TB373FU"))
+        && device_platform.eq_ignore_ascii_case("MT6897")
+        && image_platform.eq_ignore_ascii_case("MT6897");
+    let mt6835 = models.iter().all(|m| matches!(m.as_str(), "TB335FC" | "TB336FU"))
+        && device_platform.eq_ignore_ascii_case("MT6835")
+        && image_platform.eq_ignore_ascii_case("MT6835");
+    mt6897 || mt6835
+}
+
 fn validate_device_and_firmware_for_convert_wipe(
     device: &lpmbox_device::AdbDeviceProbe,
     firmware: &FirmwareInfo,
@@ -12198,6 +13213,19 @@ fn validate_device_and_firmware_for_convert_wipe(
 
     if !is_same_or_convertible_lpmbox_model_pair(&device_model, &image_model) {
         return Err(image_folder_mismatch_message());
+    }
+
+    // The normal cross-region selection below is still mandatory.
+    if device.android_major == Some(14)
+        && !android14_supported_pair_allowed(
+            device.android_major, &device_model, &device.platform,
+            &image_model, platform,
+        )
+    {
+        return Err(
+            "[Image] Android 14는 동일한 MT6897(TB375FC/TB373FU) 또는 MT6835(TB335FC/TB336FU) 모델 계열에서만 진행합니다."
+                .to_string()
+        );
     }
 
     match (device.region, firmware.region) {
@@ -12240,6 +13268,17 @@ fn validate_device_and_firmware_for_row_update_keep_data(
     if !is_same_or_convertible_lpmbox_model_pair(&device_model, &image_model) {
         return Err(image_folder_mismatch_message());
     }
+    if device.android_major == Some(14)
+        && !android14_supported_pair_allowed(
+            device.android_major, &device_model, &device.platform,
+            &image_model, platform,
+        )
+    {
+        return Err(
+            "[Image] Android 14 ROW 업데이트는 동일한 MT6897/MT6835 지원 모델 계열에서만 진행합니다."
+                .to_string()
+        );
+    }
 
     match (device.region, firmware.region) {
         (RomRegion::Row, RomRegion::Row) => {
@@ -12264,6 +13303,28 @@ fn run_proinfo_backup_flow(image_dir: PathBuf, tx: mpsc::Sender<ProinfoLiveEvent
         return;
     }
 
+    let prearmed_readback = match lpmbox_spft::PrearmedProinfoReadback::start(&image_dir) {
+        Ok(task) => task,
+        Err(err) => {
+            let _ = tx.send(ProinfoLiveEvent::Error(format!(
+                "SP Flash Tool 사전 대기 실패: {err}"
+            )));
+            return;
+        }
+    };
+    let _ = tx.send(ProinfoLiveEvent::Log(
+        "[backup] SP Flash Tool V6 proinfo 읽기 준비 완료: USB PreLoader 연결 대기 중".into()
+    ));
+    // Arm the high-frequency Windows PreLoader watcher BEFORE adb reboot.
+    // This watches concurrently while the existing reboot/fallback steps run.
+    let preloader_watch = lpmbox_device::PreloaderWatch::start(30);
+    if !preloader_watch.is_armed() {
+        prearmed_readback.cancel();
+        let _ = tx.send(ProinfoLiveEvent::Error(
+            "PreLoader 감시 초기화 실패: USB/COM 감시가 준비되지 않아 안전을 위해 재부팅을 취소합니다.".to_string()
+        ));
+        return ;
+    }
     lpmbox_device::trigger_rom_install_reboot_commands(|message| {
         let _ = tx.send(ProinfoLiveEvent::Log(message));
     });
@@ -12272,9 +13333,24 @@ fn run_proinfo_backup_flow(image_dir: PathBuf, tx: mpsc::Sender<ProinfoLiveEvent
         internal_spinner_message("preloader_detect", "[Port] PreLoader 포트 감지 중... │"),
     ));
 
-    let detect = lpmbox_device::detect_preloader_until_timeout(30);
+    let detect = preloader_watch.wait();
+    if detect.detected {
+        let _ = tx.send(ProinfoLiveEvent::Log(format!(
+            "[Port] 실기기 PreLoader 감지: {} / {}",
+            detect.display_name.as_deref().unwrap_or("COM 포트 확인"),
+            detect.method.as_deref().unwrap_or("Windows SetupAPI")
+        )));
+    }
 
     if !detect.detected {
+        prearmed_readback.cancel();
+        let _ = tx.send(ProinfoLiveEvent::Log(format!(
+            "[Port] PreLoader 검사 상세: {}",
+            detect.method.as_deref().unwrap_or("활성 PreLoader COM 미발견")
+        )));
+        let _ = tx.send(ProinfoLiveEvent::Log(
+            "[안내] Android 재부팅에서 PreLoader USB가 나타나지 않는 기기는 전원을 완전히 끈 뒤 USB를 다시 연결해야 할 수 있습니다. 플래싱은 시작되지 않았습니다.".to_string()
+        ));
         let _ = tx.send(ProinfoLiveEvent::Error(format!(
             "PreLoader 포트 감지 실패: 30초 안에 MediaTek PreLoader USB VCOM 포트를 찾지 못했습니다. 감지 문자열: {}",
             detect.checked_tokens.join(" / ")
@@ -12290,7 +13366,7 @@ fn run_proinfo_backup_flow(image_dir: PathBuf, tx: mpsc::Sender<ProinfoLiveEvent
         "[2단계] proinfo 파티션 추출 중...".to_string(),
     ));
 
-    let result = lpmbox_spft::execute_proinfo_readback_streaming(&image_dir, |event| {
+    let result = prearmed_readback.finish(|event| {
         let _ = tx.send(event);
     });
 
@@ -12398,11 +13474,15 @@ async fn load_dashboard_snapshot_worker() -> Result<DashboardSnapshot, String> {
     .unwrap_or_else(|err| Err(format!("대시보드 갱신 작업 스레드 오류: {err}")))
 }
 
-fn build_loading_progress_handles() -> Vec<iced::widget::image::Handle> {
+fn build_loading_progress_handles(dark: bool) -> Vec<iced::widget::image::Handle> {
     let mut stacked_image = image_crate::RgbaImage::from_pixel(
         LOADING_PROGRESS_SIZE,
         LOADING_PROGRESS_SIZE,
-        image_crate::Rgba([255, 255, 255, 255]),
+        if dark {
+            image_crate::Rgba([0, 0, 0, 0])
+        } else {
+            image_crate::Rgba([255, 255, 255, 255])
+        },
     );
 
     let mut handles = Vec::with_capacity(LOADING_PROGRESS_FRAME_BYTES.len());
@@ -12412,7 +13492,7 @@ fn build_loading_progress_handles() -> Vec<iced::widget::image::Handle> {
             continue;
         };
 
-        overlay_loading_progress_active_dot(&mut stacked_image, &frame_image);
+        overlay_loading_progress_active_dot(&mut stacked_image, &frame_image, dark);
 
         if let Some(handle) = loading_progress_handle_from_rgba(&stacked_image) {
             handles.push(handle);
@@ -12420,11 +13500,19 @@ fn build_loading_progress_handles() -> Vec<iced::widget::image::Handle> {
     }
 
     if handles.is_empty() {
-        handles.push(smooth_png_handle(
-            LOADING_PROGRESS_FRAME_01_BYTES,
-            LOADING_PROGRESS_SIZE,
-            LOADING_PROGRESS_SIZE,
-        ));
+        handles.push(if dark {
+            dark_outline_png_handle(
+                LOADING_PROGRESS_FRAME_01_BYTES,
+                LOADING_PROGRESS_SIZE,
+                LOADING_PROGRESS_SIZE,
+            )
+        } else {
+            smooth_png_handle(
+                LOADING_PROGRESS_FRAME_01_BYTES,
+                LOADING_PROGRESS_SIZE,
+                LOADING_PROGRESS_SIZE,
+            )
+        });
     }
 
     handles
@@ -12463,6 +13551,7 @@ fn load_loading_progress_active_dot_png(bytes: &'static [u8]) -> Option<image_cr
 fn overlay_loading_progress_active_dot(
     base: &mut image_crate::RgbaImage,
     layer: &image_crate::RgbaImage,
+    dark: bool,
 ) {
     for y in 0..LOADING_PROGRESS_SIZE {
         for x in 0..LOADING_PROGRESS_SIZE {
@@ -12472,8 +13561,45 @@ fn overlay_loading_progress_active_dot(
                 continue;
             }
 
-            base.put_pixel(x, y, image_crate::Rgba([0, 0, 0, src.0[3]]));
+            let channel = if dark { 255 } else { 0 };
+            base.put_pixel(
+                x,
+                y,
+                image_crate::Rgba([channel, channel, channel, src.0[3]]),
+            );
         }
+    }
+}
+
+// Keep light-mode PNGs unchanged. The firmware UI artwork is monochrome,
+// with some opaque white interiors: extract the dark outline as white alpha.
+fn dark_outline_png_handle(
+    bytes: &'static [u8],
+    width: u32,
+    height: u32,
+) -> iced::widget::image::Handle {
+    let Ok(image) = image_crate::load_from_memory(bytes) else {
+        return iced::widget::image::Handle::from_bytes(bytes.to_vec());
+    };
+    let mut resized = image_crate::imageops::resize(
+        &image.to_rgba8(),
+        width,
+        height,
+        image_crate::imageops::FilterType::Lanczos3,
+    );
+    recolor_monochrome_icon_for_dark(&mut resized);
+    iced::widget::image::Handle::from_rgba(width, height, resized.into_raw())
+}
+
+fn recolor_monochrome_icon_for_dark(image: &mut image_crate::RgbaImage) {
+    for pixel in image.pixels_mut() {
+        let [r, g, b, alpha] = pixel.0;
+        // White fill becomes transparent, black outlines become white.
+        // Keep antialiased grayscale edges smooth instead of hard thresholding.
+        let brightness = u16::from(r.max(g).max(b));
+        let edge_alpha = u16::from(alpha) * (255 - brightness);
+        let output_alpha = ((edge_alpha + 127) / 255) as u8;
+        *pixel = image_crate::Rgba([255, 255, 255, output_alpha]);
     }
 }
 
@@ -12681,6 +13807,27 @@ fn split_spinner_message(message: &str) -> (String, bool) {
     (message.to_string(), false)
 }
 
+fn error_is_usb_transport_related(message: &str) -> bool {
+    // Never suggest switching USB cables for malformed firmware images.
+    if message.contains("플래싱 준비 실패")
+        || message.contains("펌웨어 폴더")
+        || message.contains("DTBO")
+        || message.contains("LK 해시")
+    {
+        return false;
+    }
+    [
+        "PreLoader 포트 감지 실패",
+        "Fastboot 기기 감지 실패",
+        "Fastboot 기기 감지 시간 초과",
+        "USB ADB 기기가 감지되지",
+        "NO_USB_ADB_DEVICE",
+        "ADB USB 직접 연결 실패",
+        "USB 장치",
+        "COM 포트 감지 실패",
+    ].iter().any(|pattern| message.contains(pattern))
+}
+
 fn is_usb_debugging_shell_error(message: &str) -> bool {
     message.contains("ADB shell 실패")
         || message.contains("Open session failed")
@@ -12688,9 +13835,33 @@ fn is_usb_debugging_shell_error(message: &str) -> bool {
         || message.contains("getprop ro.build.version.release")
 }
 
+// Terminal ROM completion messages must be shared with the worker emitter.
+// Previously this predicate expected "펌웨어 설치" while the worker emitted
+// "ROM 기록"; successful SPFT downloads were therefore marked as failures.
+const PRC_ROW_INSTALL_COMPLETE_LOG: &str =
+    "[완료] 1번 옵션 PRC/ROW ROM 기록 작업을 완료했습니다.";
+const ROW_KEEP_DATA_COMPLETE_LOG: &str =
+    "[완료] 2번 옵션 ROW(글로벌) 펌웨어 기록 [데이터 유지]을 완료했습니다.";
+
+// Disconnect is not a failure after a terminal success event was processed.
+fn should_report_interrupted_flow(
+    disconnected: bool,
+    finished_this_tick: bool,
+    flow_was_active: bool,
+    last_outcome: Option<bool>,
+) -> bool {
+    disconnected && !finished_this_tick && flow_was_active
+        && last_outcome != Some(true)
+}
+
 fn is_runtime_flow_completion_log(message: &str) -> bool {
-    message.contains("[완료] 1번 옵션 PRC/ROW 펌웨어 설치 작업이 완료되었습니다.")
-        || message.contains("[완료] 2번 옵션 ROW(글로벌) 펌웨어 업데이트 [데이터 유지] 작업이 완료되었습니다.")
+    let terminal = message.trim();
+    terminal == PRC_ROW_INSTALL_COMPLETE_LOG
+        || terminal == ROW_KEEP_DATA_COMPLETE_LOG
+        // Accept legacy emitter variants as well, without changing the
+        // original localized completion messages or execution stages.
+        || terminal == "[완료] 1번 옵션 PRC/ROW 펌웨어 설치 작업이 완료되었습니다."
+        || terminal == "[완료] 2번 옵션 ROW(글로벌) 펌웨어 업데이트 [데이터 유지] 작업이 완료되었습니다."
         || message.contains("[완료] 기기 복구 [데이터 초기화] 작업이 완료되었습니다.")
         || message.contains("[완료] 국가 코드 재설정 작업이 완료되었습니다")
         || message.contains("[완료] OTA(업데이트) 비활성화 작업이 완료되었습니다.")
@@ -12944,24 +14115,17 @@ fn spft_stage_label(stage: &str) -> String {
     stage.to_string()
 }
 
-fn progress_bar(percent: u8) -> String {
-    let percent = percent.min(100);
-    let total = 20usize;
-    let filled = ((percent as usize * total) + 50) / 100;
-    let empty = total.saturating_sub(filled);
-
-    format!("[{}{}] {}%", "█".repeat(filled), "·".repeat(empty), percent)
+// LTBox-style progress presentation: a separate iced progress widget carries
+// the visual fraction. The log text keeps only the real worker percentage.
+fn spft_progress_label(percent: u8) -> String {
+    format!("({}%)", percent.min(100))
 }
 
-fn lpm_nav_rom_validation_log_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_rom_validation_log_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(238, 238, 238))),
-        text_color: Some(Color::from_rgb8(20, 20, 20)),
-        border: iced::Border {
-            radius: 0.0.into(),
-            width: 0.0,
-            color: Color::TRANSPARENT,
-        },
+        background: Some(Background::Color(c.subtle)),
+        text_color: Some(c.text),
         ..container::Style::default()
     }
 }
@@ -12981,63 +14145,32 @@ fn lpm_nav_disabled_next_button_style(
     }
 }
 
-fn lpm_nav_rom_status_card_style(has_error: bool) -> container::Style {
+fn lpm_nav_rom_status_card_style(theme: &Theme, has_error: bool) -> container::Style {
     if has_error {
-        container::Style {
-            background: Some(Background::Color(Color::from_rgb8(255, 170, 170))),
-            text_color: Some(Color::from_rgb8(32, 35, 47)),
-            border: iced::Border {
-                radius: 14.0.into(),
-                width: 1.0,
-                color: Color::from_rgb8(230, 138, 138),
-            },
-            ..container::Style::default()
-        }
+        let mut card = lpm_nav_rom_error_card_style(theme);
+        card.border.radius = 14.0.into();
+        card
     } else {
-        container::Style {
-            background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-            text_color: Some(Color::from_rgb8(32, 35, 47)),
-            border: iced::Border {
-                radius: 14.0.into(),
-                width: 1.0,
-                color: Color::from_rgb8(222, 225, 236),
-            },
-            ..container::Style::default()
-        }
+        lpm_shell_card(theme, 14.0)
     }
 }
 
 
 
-fn lpm_nav_rom_option_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 12.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_option_card_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 12.0);
+    style
 }
 
-fn lpm_nav_rom_country_popup_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 18.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        shadow: iced::Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.22),
-            offset: iced::Vector::new(0.0, 8.0),
-            blur_radius: 24.0,
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_country_popup_card_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 18.0);
+
+    style.shadow = iced::Shadow {
+        color: Color::from_rgba(0.0, 0.0, 0.0, 0.22),
+        offset: iced::Vector::new(0.0, 8.0),
+        blur_radius: 24.0,
+    };
+    style
 }
 
 fn lpm_nav_rom_country_popup_scrim_style(_theme: &Theme) -> container::Style {
@@ -13047,22 +14180,15 @@ fn lpm_nav_rom_country_popup_scrim_style(_theme: &Theme) -> container::Style {
     }
 }
 
-fn lpm_nav_dashboard_update_popup_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 8.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        shadow: iced::Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
-            offset: iced::Vector::new(0.0, 8.0),
-            blur_radius: 24.0,
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_dashboard_update_popup_card_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 8.0);
+
+    style.shadow = iced::Shadow {
+        color: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
+        offset: iced::Vector::new(0.0, 8.0),
+        blur_radius: 24.0,
+    };
+    style
 }
 
 fn lpm_nav_dashboard_update_popup_scrim_style(_theme: &Theme) -> container::Style {
@@ -13072,22 +14198,15 @@ fn lpm_nav_dashboard_update_popup_scrim_style(_theme: &Theme) -> container::Styl
     }
 }
 
-fn lpm_nav_mtk_driver_popup_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 13.0.into(),
-            width: 2.0,
-            color: Color::from_rgb8(177, 181, 198),
-        },
-        shadow: iced::Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.30),
-            offset: iced::Vector::new(0.0, 10.0),
-            blur_radius: 26.0,
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_mtk_driver_popup_card_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 13.0);
+
+    style.shadow = iced::Shadow {
+        color: Color::from_rgba(0.0, 0.0, 0.0, 0.30),
+        offset: iced::Vector::new(0.0, 8.0),
+        blur_radius: 26.0,
+    };
+    style
 }
 
 fn lpm_nav_mtk_driver_popup_scrim_style(_theme: &Theme) -> container::Style {
@@ -13098,43 +14217,45 @@ fn lpm_nav_mtk_driver_popup_scrim_style(_theme: &Theme) -> container::Style {
 }
 
 
-fn lpm_nav_rom_routine_row_disabled_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_rom_routine_row_disabled_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
+    let dark = c.page.r + c.page.g + c.page.b < 1.55;
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 235, 235))),
-        text_color: Some(Color::from_rgb8(120, 45, 45)),
+        background: Some(Background::Color(if dark { Color::from_rgb8(82, 42, 45) }
+                                             else { Color::from_rgb8(255, 235, 235) })),
+        text_color: Some(if dark { Color::from_rgb8(255, 207, 207) }
+                         else { Color::from_rgb8(120, 45, 45) }),
         border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(238, 150, 150),
+            radius: 14.0.into(), width: 1.0,
+            color: if dark { Color::from_rgb8(152, 78, 83) }
+                   else { Color::from_rgb8(238, 150, 150) },
         },
         ..container::Style::default()
     }
 }
 
-fn lpm_nav_rom_routine_row_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_rom_routine_row_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 14.0);
+    style
+}
+
+// Use the app theme's current accent (Indigo, Teal or Rose), just like
+// settings buttons. No separate per-ROM state or operation changes needed.
+fn lpm_nav_rom_chevron_accent_style(theme: &Theme) -> container::Style {
+    let accent = lpm_shell_palette(theme).accent;
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
+        background: Some(Background::Color(accent)),
         border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
+            radius: 12.0.into(),
+            ..iced::Border::default()
         },
         ..container::Style::default()
     }
 }
 
-fn lpm_nav_rom_routine_slide_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_routine_slide_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 14.0);
+    style
 }
 
 
@@ -13142,128 +14263,89 @@ fn lpm_nav_rom_routine_slide_style(_theme: &Theme) -> container::Style {
 
 
 fn lpm_nav_additional_option_button_style(
-    _theme: &Theme,
+    theme: &Theme,
     _status: iced::widget::button::Status,
 ) -> button::Style {
+    let c = lpm_shell_palette(theme);
     button::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Color::from_rgb8(32, 35, 47),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        shadow: iced::Shadow {
-            color: Color::TRANSPARENT,
-            offset: iced::Vector::new(0.0, 0.0),
-            blur_radius: 0.0,
-        },
+        background: Some(Background::Color(c.panel)),
+        text_color: c.text,
+        border: iced::Border { radius: 14.0.into(), width: 1.0, color: c.border },
         ..button::Style::default()
     }
 }
 
 fn lpm_nav_flat_button_style(
-    _theme: &Theme,
+    theme: &Theme,
     _status: iced::widget::button::Status,
 ) -> button::Style {
     button::Style {
-        background: None,
-        text_color: Color::from_rgb8(32, 35, 47),
-        border: iced::Border::default(),
-        ..button::Style::default()
+        background: None, text_color: lpm_shell_palette(theme).text,
+        border: iced::Border::default(), ..button::Style::default()
     }
 }
 
-fn lpm_nav_rom_select_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.2,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_select_card_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 14.0);
+    style
 }
 
-fn lpm_nav_rom_step_panel_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.2,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_step_panel_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 14.0);
+    style
 }
 
-fn lpm_nav_rom_step_card_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 12.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
+fn lpm_nav_rom_step_card_style(theme: &Theme) -> container::Style {
+    let mut style = lpm_shell_card(theme, 12.0);
+    style
 }
 
-fn lpm_nav_rom_error_card_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_rom_error_card_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
+    let dark = c.page.r + c.page.g + c.page.b < 1.55;
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 246, 246))),
-        text_color: Some(Color::from_rgb8(122, 32, 32)),
+        background: Some(Background::Color(if dark { Color::from_rgb8(74, 38, 42) }
+                                             else { Color::from_rgb8(255, 246, 246) })),
+        text_color: Some(if dark { Color::from_rgb8(255, 204, 204) }
+                         else { Color::from_rgb8(122, 32, 32) }),
         border: iced::Border {
-            radius: 12.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(240, 198, 198),
+            radius: 12.0.into(), width: 1.0,
+            color: if dark { Color::from_rgb8(151, 83, 83) }
+                   else { Color::from_rgb8(240, 198, 198) },
         },
         ..container::Style::default()
     }
 }
 
 fn lpm_nav_language_pick_list_style(
-    _theme: &Theme,
+    theme: &Theme,
     status: iced::widget::pick_list::Status,
 ) -> iced::widget::pick_list::Style {
+    let c = lpm_shell_palette(theme);
+    let dark = c.page.r + c.page.g + c.page.b < 1.55;
     let active = iced::widget::pick_list::Style {
-        text_color: Color::from_rgb8(32, 35, 47),
-        placeholder_color: Color::from_rgb8(92, 96, 112),
-        handle_color: Color::from_rgb8(32, 35, 47),
-        background: Background::Color(Color::from_rgb8(227, 227, 227)),
-        border: iced::Border {
-            radius: 0.0.into(),
-            width: 0.0,
-            color: Color::TRANSPARENT,
-        },
+        text_color: c.text, placeholder_color: c.muted, handle_color: c.text,
+        background: Background::Color(if dark { c.subtle } else { Color::from_rgb8(227,227,227) }),
+        border: iced::Border { radius: 7.0.into(), width: 1.0, color: c.border },
     };
-
     match status {
         iced::widget::pick_list::Status::Active => active,
-        iced::widget::pick_list::Status::Hovered | iced::widget::pick_list::Status::Opened { .. } => {
+        iced::widget::pick_list::Status::Hovered |
+        iced::widget::pick_list::Status::Opened { .. } =>
             iced::widget::pick_list::Style {
-                background: Background::Color(Color::from_rgb8(227, 227, 227)),
+                background: Background::Color(if dark { c.panel } else { Color::from_rgb8(227,227,227) }),
                 ..active
-            }
-        }
+            },
     }
 }
 
-fn lpm_nav_language_pick_list_menu_style(_theme: &Theme) -> iced::widget::overlay::menu::Style {
+fn lpm_nav_language_pick_list_menu_style(theme: &Theme) -> iced::widget::overlay::menu::Style {
+    let c = lpm_shell_palette(theme);
     iced::widget::overlay::menu::Style {
-        background: Background::Color(Color::from_rgb8(255, 255, 255)),
-        border: iced::Border {
-            radius: 0.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        text_color: Color::from_rgb8(32, 35, 47),
-        selected_text_color: Color::from_rgb8(32, 35, 47),
-        selected_background: Background::Color(Color::from_rgb8(238, 240, 250)),
+        background: Background::Color(c.panel),
+        border: iced::Border { radius: 8.0.into(), width: 1.0, color: c.border },
+        text_color: c.text, selected_text_color: c.text,
+        selected_background: Background::Color(c.subtle),
         shadow: iced::Shadow::default(),
     }
 }
@@ -13289,24 +14371,13 @@ fn lpm_nav_settings_move_button_style(
     }
 }
 fn lpm_nav_rom_card_button_style(
-    _theme: &Theme,
-    status: iced::widget::button::Status,
+    theme: &Theme,
+    _status: iced::widget::button::Status,
 ) -> iced::widget::button::Style {
-    let shadow_offset = if matches!(status, iced::widget::button::Status::Pressed) {
-        iced::Vector::new(0.0, 0.0)
-    } else {
-        iced::Vector::new(0.0, 0.0)
-    };
-
     iced::widget::button::Style {
         background: None,
-        text_color: Color::from_rgb8(25, 27, 36),
+        text_color: lpm_shell_palette(theme).text,
         border: iced::Border::default(),
-        shadow: iced::Shadow {
-            color: Color::TRANSPARENT,
-            offset: shadow_offset,
-            blur_radius: 0.0,
-        },
         ..iced::widget::button::Style::default()
     }
 }
@@ -13323,141 +14394,130 @@ fn lpm_nav_dashboard_black_screen_style(_theme: &Theme) -> container::Style {
     }
 }
 
-fn lpm_nav_app_background_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(248, 248, 252))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        ..container::Style::default()
+// GBST 2.0.0 Material-style shell palette, adapted to LPMBox firmware UI.
+#[derive(Clone, Copy)]
+struct LpmShellPalette {
+    page: Color,
+    sidebar: Color,
+    panel: Color,
+    subtle: Color,
+    text: Color,
+    muted: Color,
+    border: Color,
+    accent: Color,
+    log: Color,
+}
+fn lpm_shell_palette(theme: &Theme) -> LpmShellPalette {
+    let p = theme.palette();
+    let dark = p.background.r + p.background.g + p.background.b < 1.55;
+    LpmShellPalette {
+        page: p.background,
+        sidebar: if dark { Color::from_rgb8(27, 27, 33) }
+                 else { Color::from_rgb8(246, 246, 251) },
+        panel: if dark { Color::from_rgb8(32, 31, 38) }
+               else { Color::from_rgb8(255, 255, 255) },
+        subtle: if dark { Color::from_rgb8(42, 41, 48) }
+                else { Color::from_rgb8(239, 239, 246) },
+        text: p.text,
+        muted: if dark { Color::from_rgb8(199, 197, 208) }
+               else { Color::from_rgb8(113, 116, 130) },
+        border: if dark { Color::from_rgb8(71, 70, 79) }
+                else { Color::from_rgb8(222, 225, 236) },
+        accent: p.primary,
+        log: if dark { Color::from_rgb8(24, 25, 31) }
+             else { Color::from_rgb8(244, 244, 249) },
     }
 }
-
-fn lpm_nav_menu_panel_style(_theme: &Theme) -> container::Style {
+fn lpm_shell_card(theme: &Theme, radius: f32) -> container::Style {
+    let colors = lpm_shell_palette(theme);
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(246, 246, 251))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        ..container::Style::default()
-    }
-}
-
-fn lpm_nav_section_label_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(239, 239, 246))),
-        text_color: Some(Color::from_rgb8(113, 116, 130)),
-        ..container::Style::default()
-    }
-}
-
-fn lpm_nav_divider_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(210, 212, 224))),
-        ..container::Style::default()
-    }
-}
-
-fn lpm_nav_footer_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(246, 246, 251))),
-        text_color: Some(Color::from_rgb8(45, 48, 62)),
-        ..container::Style::default()
-    }
-}
-
-fn lpm_nav_header_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(28, 31, 45)),
+        background: Some(Background::Color(colors.panel)),
+        text_color: Some(colors.text),
         border: iced::Border {
-            radius: 0.0.into(),
-            width: 1.2,
-            color: Color::from_rgb8(222, 225, 236),
-        },
-        ..container::Style::default()
-    }
-}
-
-fn lpm_nav_settings_panel_style(_theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 12.0.into(),
+            radius: radius.into(),
             width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
+            color: colors.border,
         },
         ..container::Style::default()
     }
 }
-
-fn lpm_nav_panel_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_app_background_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
+        background: Some(Background::Color(c.page)),
+        text_color: Some(c.text),
         ..container::Style::default()
     }
 }
-
-
-fn lpm_nav_extra_option_card_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_menu_panel_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
+        background: Some(Background::Color(c.sidebar)),
+        text_color: Some(c.text),
         ..container::Style::default()
     }
 }
-
-
-fn lpm_nav_status_idle_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_section_label_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(222, 244, 231))),
-        text_color: Some(Color::from_rgb8(23, 104, 59)),
+        background: Some(Background::Color(c.subtle)),
+        text_color: Some(c.muted),
         ..container::Style::default()
     }
 }
-
-fn lpm_nav_status_busy_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_divider_style(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 238, 214))),
-        text_color: Some(Color::from_rgb8(150, 82, 20)),
+        background: Some(Background::Color(lpm_shell_palette(theme).border)),
         ..container::Style::default()
     }
 }
-
-
-fn lpm_nav_dashboard_inner_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_footer_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 12.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(222, 225, 236),
-        },
+        background: Some(Background::Color(c.sidebar)),
+        text_color: Some(c.text),
         ..container::Style::default()
     }
 }
-
-fn lpm_nav_dashboard_action_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_header_style(theme: &Theme) -> container::Style {
+    lpm_shell_card(theme, 8.0)
+}
+fn lpm_nav_settings_panel_style(theme: &Theme) -> container::Style {
+    lpm_shell_card(theme, 14.0)
+}
+fn lpm_nav_panel_style(theme: &Theme) -> container::Style {
+    lpm_shell_card(theme, 12.0)
+}
+fn lpm_nav_extra_option_card_style(theme: &Theme) -> container::Style {
+    lpm_shell_card(theme, 14.0)
+}
+fn lpm_nav_status_idle_style(theme: &Theme) -> container::Style {
+    let dark = theme.palette().background.r < 0.4;
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(255, 255, 255))),
-        text_color: Some(Color::from_rgb8(32, 35, 47)),
-        border: iced::Border {
-            radius: 12.0.into(),
-            width: 1.0,
-            color: Color::from_rgb8(210, 214, 228),
-        },
+        background: Some(Background::Color(if dark { Color::from_rgb8(35, 74, 54) } else { Color::from_rgb8(222, 244, 231) })),
+        text_color: Some(if dark { Color::from_rgb8(173, 230, 188) } else { Color::from_rgb8(23, 104, 59) }),
         ..container::Style::default()
     }
 }
-
-fn log_container_style(_theme: &Theme) -> container::Style {
+fn lpm_nav_status_busy_style(theme: &Theme) -> container::Style {
+    let dark = theme.palette().background.r < 0.4;
     container::Style {
-        background: Some(Background::Color(Color::from_rgb8(238, 238, 238))),
-        text_color: Some(Color::from_rgb8(20, 20, 20)),
+        background: Some(Background::Color(if dark { Color::from_rgb8(91, 61, 37) } else { Color::from_rgb8(255, 238, 214) })),
+        text_color: Some(if dark { Color::from_rgb8(255, 211, 153) } else { Color::from_rgb8(150, 82, 20) }),
+        ..container::Style::default()
+    }
+}
+fn lpm_nav_dashboard_inner_style(theme: &Theme) -> container::Style {
+    lpm_shell_card(theme, 14.0)
+}
+fn lpm_nav_dashboard_action_style(theme: &Theme) -> container::Style {
+    lpm_shell_card(theme, 14.0)
+}
+fn log_container_style(theme: &Theme) -> container::Style {
+    let c = lpm_shell_palette(theme);
+    container::Style {
+        background: Some(Background::Color(c.log)),
+        text_color: Some(c.text),
         ..container::Style::default()
     }
 }
@@ -13974,4 +15034,504 @@ mod lpm_i18n_tests {
         }
     }
 
+}
+
+
+#[cfg(test)]
+mod image_folder_resolution_tests {
+    use super::*;
+    #[test]
+    fn image_folder_picker_resolves_parent_and_leaf_without_guessing_elsewhere() {
+        let base = std::env::temp_dir()
+            .join(format!("lpmbox_image_picker_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("firmware/image")).unwrap();
+        let parent = base.join("firmware");
+        let leaf = parent.join("image");
+        assert_eq!(resolve_image_folder_selection(&parent).unwrap(), leaf);
+        assert_eq!(resolve_image_folder_selection(&leaf).unwrap(), leaf);
+        let nested = leaf.join("download_agent");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(resolve_image_folder_selection(&nested).unwrap(), leaf);
+        let deeper = nested.join("vendor");
+        std::fs::create_dir_all(&deeper).unwrap();
+        assert_eq!(resolve_image_folder_selection(&deeper).unwrap(), leaf);
+        // An unrelated tree containing no directory named image is rejected.
+        assert!(resolve_image_folder_selection(&base).is_err());
+        assert!(resolve_image_folder_selection(&base.join("missing")).is_err());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+}
+
+
+#[cfg(test)]
+mod spft_presentation_tests {
+    use super::*;
+    #[test]
+    fn progress_logs_do_not_print_ascii_block_bars() {
+        assert_eq!(spft_progress_label(0), "(0%)");
+        assert_eq!(spft_progress_label(53), "(53%)");
+        assert_eq!(spft_progress_label(100), "(100%)");
+        assert_eq!(spft_progress_label(255), "(100%)");
+    }
+}
+
+#[cfg(test)]
+mod dark_firmware_icon_tests {
+    use super::*;
+
+    #[test]
+    fn white_background_is_transparent_and_black_outline_is_white() {
+        let mut image = image_crate::RgbaImage::new(4, 1);
+        image.put_pixel(0, 0, image_crate::Rgba([0, 0, 0, 255]));
+        image.put_pixel(1, 0, image_crate::Rgba([255, 255, 255, 255]));
+        image.put_pixel(2, 0, image_crate::Rgba([128, 128, 128, 255]));
+        image.put_pixel(3, 0, image_crate::Rgba([0, 0, 0, 0]));
+        recolor_monochrome_icon_for_dark(&mut image);
+        assert_eq!(image.get_pixel(0, 0).0, [255, 255, 255, 255]);
+        assert_eq!(image.get_pixel(1, 0).0, [255, 255, 255, 0]);
+        assert_eq!(image.get_pixel(2, 0).0, [255, 255, 255, 127]);
+        assert_eq!(image.get_pixel(3, 0).0, [255, 255, 255, 0]);
+    }
+
+    #[test]
+    fn dark_spinner_is_white_on_transparent_background() {
+        let active = load_loading_progress_active_dot_png(
+            LOADING_PROGRESS_FRAME_01_BYTES,
+        ).expect("valid spinner PNG");
+        let mut dark = image_crate::RgbaImage::from_pixel(
+            LOADING_PROGRESS_SIZE,
+            LOADING_PROGRESS_SIZE,
+            image_crate::Rgba([0, 0, 0, 0]),
+        );
+        overlay_loading_progress_active_dot(&mut dark, &active, true);
+        assert_eq!(dark.get_pixel(0, 0).0[3], 0);
+        assert!(dark.pixels().any(|p| p.0 == [255, 255, 255, 255]));
+        assert!(dark.pixels().all(|p| p.0[3] == 0 ||
+            p.0[0..3] == [255, 255, 255]));
+    }
+
+    #[test]
+    fn all_firmware_icons_generate_white_strokes_without_opaque_white_fill() {
+        for source in [
+            FOLDER_SELECT_ICON_BYTES,
+            FOLDER_CHECK_ICON_BYTES,
+            TABLET_CHECK_ICON_BYTES,
+            TABLET_X_ICON_BYTES,
+            TABLET_FIX_ICON_BYTES,
+            ROM_INSTALL_ICON_BYTES,
+            ROM_UPDATE_ICON_BYTES,
+        ] {
+            let mut image = image_crate::load_from_memory(source)
+                .expect("firmware PNG")
+                .to_rgba8();
+            recolor_monochrome_icon_for_dark(&mut image);
+            assert!(image.pixels().any(|p| p.0[3] == 0));
+            assert!(image.pixels().any(|p| p.0[3] > 230));
+            assert!(image.pixels().all(|p| p.0[0..3] == [255, 255, 255]));
+        }
+    }
+
+    #[test]
+    fn original_light_icon_assets_remain_unchanged() {
+        let original = image_crate::load_from_memory(FOLDER_CHECK_ICON_BYTES)
+            .unwrap().to_rgba8();
+        assert!(original.pixels().any(|p|
+            p.0[3] > 200 && p.0[0] > 240));
+        assert!(original.pixels().any(|p|
+            p.0[3] > 200 && p.0[0] < 30));
+    }
+}
+
+#[cfg(test)]
+mod ltbox_ui_port_tests {
+    use super::*;
+
+    #[test]
+    fn disclaimer_requires_explicit_check_to_close() {
+        let (mut app, _startup) = App::new();
+        assert!(app.startup_disclaimer_open);
+        assert!(!app.startup_disclaimer_checked);
+        let _ = app.update(Message::DisclaimerConfirm);
+        assert!(app.startup_disclaimer_open);
+        let _ = app.update(Message::DisclaimerToggled(true));
+        let _ = app.update(Message::DisclaimerConfirm);
+        assert!(!app.startup_disclaimer_open);
+    }
+
+    #[test]
+    fn country_selection_is_only_committed_after_confirmation() {
+        let (mut app, _startup) = App::new();
+        app.rom_country_popup_open = true;
+        app.rom_option_country_code = None;
+        let _ = app.update(Message::RomCountryStage("KR".to_owned()));
+        assert_eq!(app.rom_country_draft.as_deref(), Some("KR"));
+        assert_eq!(app.rom_option_country_code, None);
+        let _ = app.update(Message::RomCloseCountryPopup);
+        assert_eq!(app.rom_country_draft, None);
+        assert_eq!(app.rom_option_country_code, None);
+    }
+
+    #[test]
+    fn visible_gbst_sidebar_hides_root_and_unroot(){
+        let src=include_str!("gbst_shell.rs");
+        assert!(!src.contains("self.gbst_nav_item(NavPage::Root,"));
+        assert!(!src.contains("self.gbst_nav_item(NavPage::Unroot,"));
+        assert!(src.contains("self.gbst_nav_item(NavPage::Rom,"));
+        assert!(src.contains("self.gbst_nav_item(NavPage::Driver,"));
+    }
+
+    #[test]
+    fn log_text_wraps_inside_scrollbar_gutter(){
+        let src=include_str!("gbst_shell.rs");
+        assert!(src.contains("Wrapping::WordOrGlyph"));
+        assert!(src.contains("right: 48.0"));
+        assert!(src.contains(".width(8.0).scroller_width(6).spacing(16.0)"));
+        assert!(src.contains("lpmbox-rom-work-history"));
+        assert!(src.contains(".auto_scroll(true).anchor_top().anchor_left()"));
+    }
+
+    #[test]
+    fn root_and_unroot_are_not_exposed_in_sidebar() {
+        let visible = LPM_NAV_MAIN.iter().map(|(page,_,_)|*page)
+            .collect::<Vec<_>>();
+        assert!(visible.contains(&NavPage::Dashboard));
+        assert!(visible.contains(&NavPage::Rom));
+        assert!(visible.contains(&NavPage::Driver));
+        assert!(!visible.contains(&NavPage::Root));
+        assert!(!visible.contains(&NavPage::Unroot));
+    }
+
+    #[test]
+    fn work_history_bottom_scroll_uses_matching_anchor(){
+        let shell=include_str!("gbst_shell.rs");
+        let wizard=include_str!("partition_wizard.rs");
+        assert!(shell.contains(".auto_scroll(true).anchor_top().anchor_left()"));
+        assert!(wizard.contains(".anchor_top().height(Length::Fill)"));
+        assert!(!shell.contains(".auto_scroll(true).anchor_bottom()"));
+        assert!(shell.contains("lpmbox-rom-work-history"));
+        assert!(wizard.contains("lpmbox-partition-history"));
+        // Iced Offset::Relative(1.0) + Anchor::Start scrolls to bottom.
+        // Anchor::End reverses the translation and displays the first line.
+    }
+    #[test]
+    fn unsupported_root_navigation_does_not_run_firmware_workers() {
+        let (mut app, _startup) = App::new();
+        assert!(!app.busy);
+        let initial_page=app.active_nav;
+        let _ = app.update(Message::SelectNav(NavPage::Root));
+        assert_eq!(app.active_nav, initial_page);
+        assert!(!app.busy);
+        let _ = app.update(Message::SelectNav(NavPage::Unroot));
+        assert_eq!(app.active_nav, initial_page);
+        assert!(!app.busy);
+    }
+
+    #[test]
+    fn narrow_advanced_layout_does_not_change_on_sidebar_hover() {
+        assert!(!lpm_advanced_two_columns(820.0));
+        assert!(!lpm_advanced_two_columns(1040.0));
+        assert!(!lpm_advanced_two_columns(1079.0));
+        assert!(lpm_advanced_two_columns(1200.0));
+    }
+
+    #[test]
+    fn rom_cards_fit_a_docked_sidebar_and_long_locale_explanations() {
+        assert!(lpm_rom_card_width(822.0, 81.0) <= ROM_ROUTINE_CARD_WIDTH);
+        assert!(lpm_rom_card_width(822.0, 235.0) <= 530.0);
+        assert!(lpm_rom_card_width(822.0, 235.0) >= 350.0);
+        assert!(lpm_rom_card_height(LanguageOption::Georgian) >= 140.0);
+        assert!(lpm_rom_card_height(LanguageOption::Greek) >= 140.0);
+        assert!(lpm_rom_card_height(LanguageOption::Arabic) >= 140.0);
+        assert!(lpm_rom_card_height(LanguageOption::English) >= 100.0);
+    }
+
+    #[test]
+    fn firmware_cards_fit_on_one_row_at_default_collapsed_width() {
+        assert!(lpm_firmware_summary_two_columns(820.0, SIDEBAR_RAIL_WIDTH));
+        assert!(lpm_firmware_summary_two_columns(822.0, SIDEBAR_RAIL_WIDTH));
+        assert!(!lpm_firmware_summary_two_columns(820.0, SIDEBAR_EXPANDED_WIDTH));
+        assert!(lpm_firmware_summary_two_columns(1120.0, SIDEBAR_EXPANDED_WIDTH));
+    }
+
+    #[test]
+    fn screenshot_reference_window_size_is_used_by_default() {
+        assert_eq!((WINDOW_WIDTH, WINDOW_HEIGHT), (1085.0, 745.0));
+    }
+
+    #[test]
+    fn rom_chevron_rail_uses_each_settings_accent_color() {
+        for choice in AccentChoice::ALL {
+            for mode in [ThemeChoice::Dark, ThemeChoice::Light] {
+                let theme = Appearance { theme: mode, accent: choice }.as_theme(false);
+                let style = lpm_nav_rom_chevron_accent_style(&theme);
+                match style.background {
+                    Some(Background::Color(color)) => assert_eq!(
+                        color, choice.color(),
+                        "ROM arrow should reflect selected accent: {:?} / {:?}", choice, mode
+                    ),
+                    other => panic!("ROM chevron has no accent background: {other:?}"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn external_adb_preflight_blocks_before_rom_worker_state_changes() {
+        let (mut app, _startup) = App::new();
+        assert!(!app.busy);
+        assert!(app.record_rom_external_adb_status(true));
+        assert!(app.external_adb_server_active);
+        assert_eq!(app.running_rom_target, None);
+        assert!(!app.busy);
+        assert!(!app.record_rom_external_adb_status(false));
+        assert!(!app.external_adb_server_active);
+        assert_eq!(app.running_rom_target, None);
+        assert!(!app.busy);
+    }
+
+    #[test]
+    fn dashboard_eight_details_fit_the_reference_window() {
+        assert!(App::shell_device_details_two_columns(
+            1056.0, SIDEBAR_RAIL_WIDTH));
+        assert!(App::shell_device_details_two_columns(
+            1056.0, SIDEBAR_EXPANDED_WIDTH));
+        assert!(!App::shell_device_details_two_columns(
+            820.0, SIDEBAR_RAIL_WIDTH));
+        assert!(!App::shell_device_details_two_columns(
+            820.0, SIDEBAR_EXPANDED_WIDTH));
+        assert!(App::shell_device_details_two_columns(1440.0, 235.0));
+    }
+
+    #[test]
+    fn rom_picker_and_loading_cards_use_bounded_centered_parent() {
+        for width in [820.0, 1056.0, 1440.0] {
+            // Both empty-folder picker and firmware validation must be
+            // vertically centered even when the nav rail is expanded.
+            assert!(lpm_rom_panel_can_center(false, false, width, 752.0, SIDEBAR_RAIL_WIDTH));
+            assert!(lpm_rom_panel_can_center(false, false, width, 752.0, SIDEBAR_EXPANDED_WIDTH));
+        }
+        // Completed firmware information stays centered on a standard window.
+        assert!(lpm_rom_panel_can_center(true, false, 1056.0, 752.0, SIDEBAR_RAIL_WIDTH));
+        assert!(lpm_rom_panel_can_center(true, false, 1056.0, 752.0, SIDEBAR_EXPANDED_WIDTH));
+        // Narrow windows and extra error cards keep scroll support.
+        assert!(!lpm_rom_panel_can_center(true, false, 820.0, 720.0, SIDEBAR_EXPANDED_WIDTH));
+        assert!(!lpm_rom_panel_can_center(true, false, 1056.0, 680.0, SIDEBAR_RAIL_WIDTH));
+        assert!(!lpm_rom_panel_can_center(true, true, 1056.0, 752.0, SIDEBAR_RAIL_WIDTH));
+    }
+
+    #[test]
+    fn adb_warning_colors_keep_light_and_dark_contrast_independent_of_accent() {
+        for mode in [ThemeChoice::Light, ThemeChoice::Dark] {
+            let mut palette = None;
+            for accent in AccentChoice::ALL {
+                let theme = Appearance { theme: mode, accent }.as_theme(false);
+                let colors = shell_warning_palette(&theme);
+                assert_eq!(colors.0, match mode {
+                    ThemeChoice::Dark => Color::from_rgb8(77, 55, 22),
+                    _ => Color::from_rgb8(255, 243, 207),
+                });
+                assert_ne!(colors.0, colors.1);
+                assert_ne!(colors.0, colors.2);
+                if let Some(previous) = palette {
+                    assert_eq!(colors, previous, "warning must not use an app accent color");
+                }
+                palette = Some(colors);
+            }
+        }
+    }
+
+    #[test]
+    fn ltbox_navigation_icons_load_as_pngs() {
+        for icon in [
+            NAV_LTBOX_ROOT_ICON_BYTES,
+            NAV_LTBOX_UNROOT_ICON_BYTES,
+            NAV_LTBOX_INFO_ICON_BYTES,
+        ] {
+            let image = image_crate::load_from_memory(icon).expect("valid icon");
+            assert_eq!(image.width(), 96);
+            assert_eq!(image.height(), 96);
+            assert!(image.to_rgba8().pixels().any(|pixel| pixel.0[3] == 0));
+        }
+    }
+
+    #[test]
+    fn flag_assets_are_valid_svg_markup() {
+        for code in ["KR", "US", "CN", "JP", "TW", "DE", "FR", "VN"] {
+            let flag = country_flags::svg(code).expect("bundled flag");
+            assert!(std::str::from_utf8(flag).unwrap().contains("<svg"));
+        }
+        assert!(country_flags::svg("ZZ").is_none());
+    }
+}
+
+
+#[cfg(test)]
+mod android14_tb375_trial_tests {
+    use super::*;
+
+    #[test]
+    fn android14_cross_region_and_row_family_routes_are_eligible() {
+        for (device, platform, image, image_platform) in [
+            ("TB375FC", "MT6897", "TB373FU", "MT6897"),
+            ("TB373FU", "MT6897", "TB375FC", "MT6897"),
+            ("TB373FU", "MT6897", "TB373FU", "MT6897"),
+            ("TB335FC", "MT6835", "TB336FU", "MT6835"),
+            ("TB336FU", "MT6835", "TB336FU", "MT6835"),
+        ] {
+            assert!(android14_supported_pair_allowed(
+                Some(14),device,platform,image,image_platform
+            ));
+        }
+    }
+
+    #[test]
+    fn invalid_platforms_or_other_families_cannot_use_android14_exception() {
+        for (device,platform,image,image_platform) in [
+            ("TB335FC","MT6897","TB373FU","MT6897"),
+            ("TB375FC","MT6835","TB373FU","MT6897"),
+            ("TB375FC","MT6897","TB373FU","MT6835"),
+            ("TB365FC","MT6835","TB361FU","MT6835"),
+        ]{
+            assert!(!android14_supported_pair_allowed(
+                Some(14),device,platform,image,image_platform
+            ));
+        }
+    }
+
+    #[test]
+    fn android14_exception_is_not_granted_to_other_android_versions() {
+        for major in [None,Some(13),Some(15),Some(16)] {
+            assert!(!android14_supported_pair_allowed(
+                major,"TB375FC","MT6897","TB373FU","MT6897"
+            ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod completion_status_regression_tests {
+    use super::*;
+
+    #[test]
+    fn actual_spft_worker_terminal_messages_are_successful() {
+        assert!(is_runtime_flow_completion_log(PRC_ROW_INSTALL_COMPLETE_LOG));
+        assert!(is_runtime_flow_completion_log(ROW_KEEP_DATA_COMPLETE_LOG));
+        assert!(is_runtime_flow_completion_log(
+            "[완료] 1번 옵션 PRC/ROW ROM 기록 작업을 완료했습니다."
+        ));
+        assert!(is_runtime_flow_completion_log(
+            "[완료] 2번 옵션 ROW(글로벌) 펌웨어 기록 [데이터 유지]을 완료했습니다."
+        ));
+    }
+
+    #[test]
+    fn older_completion_messages_remain_supported() {
+        for message in [
+            "[완료] 1번 옵션 PRC/ROW 펌웨어 설치 작업이 완료되었습니다.",
+            "[완료] 2번 옵션 ROW(글로벌) 펌웨어 업데이트 [데이터 유지] 작업이 완료되었습니다.",
+            "[완료] 기기 복구 [데이터 초기화] 작업이 완료되었습니다.",
+            "[완료] 국가 코드 재설정 작업이 완료되었습니다: KR",
+            "[완료] OTA(업데이트) 비활성화 작업이 완료되었습니다.",
+            "[완료] OTA(업데이트) 활성화 작업이 완료되었습니다.",
+        ] {
+            assert!(is_runtime_flow_completion_log(message), "{message}");
+        }
+    }
+
+    #[test]
+    fn intermediate_spft_progress_and_errors_are_not_success() {
+        for line in [
+            "[SPFT] lk_a (22/58) (100%)",
+            "[SPFT] super (57/58) (100%)",
+            "[SPFT] image (100%)",
+            "[SPFT] DA 설정 (100%)",
+            "[Error] 작업이 비정상적으로 종료되었습니다.",
+            "SPFlashToolV6 download 실패",
+            "",
+        ] {
+            assert!(!is_runtime_flow_completion_log(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn firmware_validation_is_not_a_usb_cable_failure() {
+        assert!(!error_is_usb_transport_related(
+            "플래싱 준비 실패: 선택한 펌웨어의 DTBO 크기/헤더 검증 실패"
+        ));
+        assert!(!error_is_usb_transport_related("PRC LK 해시 오류"));
+        assert!(error_is_usb_transport_related("PreLoader 포트 감지 실패"));
+        assert!(error_is_usb_transport_related("Fastboot 기기 감지 실패"));
+    }
+
+    #[test]
+    fn channel_close_after_success_is_not_a_cable_error() {
+        assert!(!should_report_interrupted_flow(true, false, true, Some(true)));
+        assert!(!should_report_interrupted_flow(true, true, true, Some(true)));
+        assert!(!should_report_interrupted_flow(false, false, true, None));
+        assert!(!should_report_interrupted_flow(true, false, false, None));
+        assert!(should_report_interrupted_flow(true, false, true, None));
+        assert!(should_report_interrupted_flow(true, false, true, Some(false)));
+    }
+}
+
+#[cfg(test)]
+mod rom_sidebar_header_recovery_20261114_tests {
+    use super::*;
+    #[test]
+    fn firmware_download_is_not_in_any_visible_navigation_list(){
+        assert!(!LPM_NAV_MAIN.iter().any(|(page,_,_)|
+            *page==NavPage::FirmwareDownload));
+        assert!(!LPM_NAV_TOOLS.iter().any(|(page,_,_)|
+            *page==NavPage::FirmwareDownload));
+    }
+    #[test]
+    fn rom_workflow_title_only_display_rules_are_applied(){
+        let source=include_str!("main.rs");
+        // This is a source-level UI regression guard; rendering details are
+        // covered by the already existing Iced GUI tests.
+        for marker in [
+            "else if self.active_nav == NavPage::Log {",
+            "else if self.active_nav == NavPage::Rom && self.rom_show_routine_select {",
+            "else if self.active_nav == NavPage::Rom && self.image_dir.is_some() {",
+            "else if self.active_nav == NavPage::Rom {",
+        ]{assert!(source.contains(marker));}
+    }
+    #[test]
+    fn recovery_reuses_common_lk_preflight_and_flash_plan(){
+        let src=include_str!("main.rs");
+        let start=src.find("fn run_reinstall_wipe_flow(").unwrap();
+        let end=src[start..].find("fn run_mtk_driver_prepare_flow(").unwrap()+start;
+        let recovery=&src[start..end];
+        assert!(recovery.contains("InstallMode::ReinstallWipe"));
+        assert!(recovery.contains("preflight_lk_before_device_changes"));
+        assert!(recovery.contains("prepare_flash_plan_with_log"));
+        assert!(recovery.contains("[Recovery LK]"));
+    }
+}
+
+#[cfg(test)]
+mod android14_supported_pair_routing_20261115_tests {
+    use super::*;
+    #[test]
+    fn android14_accepts_only_matching_supported_mtk_families() {
+        assert!(android14_supported_pair_allowed(
+            Some(14), "TB375FC", "MT6897", "TB373FU", "MT6897"));
+        assert!(android14_supported_pair_allowed(
+            Some(14), "TB373FU", "MT6897", "TB375FC", "MT6897"));
+        assert!(android14_supported_pair_allowed(
+            Some(14), "TB373FU", "MT6897", "TB373FU", "MT6897"));
+        assert!(android14_supported_pair_allowed(
+            Some(14), "TB335FC", "MT6835", "TB336FU", "MT6835"));
+        assert!(android14_supported_pair_allowed(
+            Some(14), "TB336FU", "MT6835", "TB336FU", "MT6835"));
+        assert!(!android14_supported_pair_allowed(
+            Some(13), "TB375FC", "MT6897", "TB373FU", "MT6897"));
+        assert!(!android14_supported_pair_allowed(
+            Some(14), "TB375FC", "MT6897", "TB336FU", "MT6835"));
+        assert!(!android14_supported_pair_allowed(
+            Some(14), "TB375FC", "MT6835", "TB373FU", "MT6897"));
+        assert!(!android14_supported_pair_allowed(
+            Some(14), "TB365FC", "MT6835", "TB361FU", "MT6835"));
+    }
 }

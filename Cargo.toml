@@ -9,9 +9,9 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "3.1.2"
+version = "4.0.1"
 edition = "2024"
-license = "CC-BY-NC-SA-4.0"
+license = "GPL-3.0-only"
 
 [workspace.dependencies]
 ureq = "2"
@@ -27,7 +27,7 @@ aes = "0.9"
 cbc = { version = "0.2", features = ["alloc"] }
 sha2 = "0.11"
 
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 adb_client = { version = "3", features = ["usb"] }
 rsa = { version = "0.9", features = ["pem"] }
@@ -38,9 +38,16 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 iced = { version = "0.14", features = ["tokio", "svg", "image", "advanced"] }
 tokio = { version = "1", features = ["rt", "macros"] }
 
-rfd = "0.17"
-dirs = "6"
+rfd = "0.18"
+dirs = "7"
 open = "5"
 semver = "1"
 chrono = { version = "0.4", features = ["clock"] }
 sys-locale = "0.3"
+
+
+# LTBox 3.3.5-inspired Release tuning: no runtime workflow changes.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

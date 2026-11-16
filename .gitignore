@@ -9,4 +9,23 @@
 *.tmp
 *.bak
 *.bak-*
+__pycache__/
+*.pyc
+/dist/
+/list.txt
+
+# Local configuration, credentials, and generated developer artifacts
+.env
+.env.*
+!.env.example
+adbkey
+adbkey.pub
+*.p12
+*.pfx
+*.key
+*.pdb
+*.ilk
+*.obj
+*.log
+*.zip
 

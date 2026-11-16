@@ -1,183 +1,57 @@
-# LPMBOX
+# LPMBox
 
-![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)
+**LPMBox v4.0.1** is an open-source Windows utility for firmware and device-management workflows on selected **Lenovo MediaTek tablets**.
 
-> This project follows the **LTBox documentation style** and is released under the **LTBox license model**.
->
-> * [LTBox](https://github.com/jjhitel/LTBox), [LTBox License](https://github.com/jjhitel/LTBox?tab=License-1-ov-file)
-> * Inspired by LTBox and adapted for **MediaTek-based Lenovo tablet firmware workflows**.
-> * **This project is not affiliated with or endorsed by the LTBox developer. I only received permission to develop LPMBox.**
-> * Based on LTBox (CC BY-NC-SA 4.0); modified and extended by **돠스 (dwas)** for MTK Lenovo firmware workflows.
-> * **NonCommercial:** Do not sell this project, offer paid access, or use it primarily for commercial advantage or monetary compensation.
+🌐 Languages & LPMBOX Error List and Solutions
+English (en) / 한국어 (ko) / Русский (ru) / 日本語 (jp)
+繁體中文 (CN/TW) / Tiếng Việt (vi) / Ελληνικά (el) / हिन्दी (hi)
+ქართული (ka) / Nederlands (nl) / العربية (ar) / Español (es)
 
----
+[Download releases](https://github.com/dwas-KR/LPMBox/releases) · [Report an issue](https://github.com/dwas-KR/LPMBox/issues) · [Video guide](https://youtu.be/M3hUF-AVJbM)
 
-## 1. Developer YouTube
-* Maintained by: **돠스 (dwas)**
-* [Youtube Channel](https://www.youtube.com/@dwas_KR?sub_confirmation=1)
-* [Watch the video](https://youtu.be/M3hUF-AVJbM?si=CkAkY9Rv6jFtvQmm)
-  
-[![Watch the video](https://img.youtube.com/vi/M3hUF-AVJbM/0.jpg)](https://youtu.be/M3hUF-AVJbM?si=CkAkY9Rv6jFtvQmm)
+## Features
 
----
+- **ROM installation:** PRC (China) ↔ ROW (Global) firmware workflows; a clean installation erases user data.
+- **ROW updates:** Firmware update workflows for supported device and version combinations.
+- **Flashing safeguards:** Model, firmware, LK-image integrity and partition/slot checks.
+- **Device tools:** ADB, Fastboot, MediaTek PreLoader and SP Flash Tool integration.
+- **Desktop UI:** Multiple languages, operation history, logs and settings.
 
-## 2. Overview
+## Device families
 
-**LPMBox** is a helper tool designed to make PRC (CN) / ROW (Global) firmware operations easier on **MediaTek (MTK)-based Lenovo tablets**.
+| PRC (China) | ROW (Global) | Family |
+| --- | --- | --- |
+| TB375FC | TB373FU | Xiaoxin Pad Pro 2025 |
+| TB335FC | TB336FU | Xiaoxin Pad 2025 |
+| TB365FC | TB361FU | Xiaoxin Pad 12.1 |
 
-### Languages & LPMBOX Error List and Solutions
-* [English (en)](https://dwas.tistory.com/20) / [한국어 (ko)](https://dwas.tistory.com/19) / [Русский (ru)](https://dwas.tistory.com/25) / [日本語 (jp)](https://dwas.tistory.com/23)
-* [繁體中文 (CN/TW)](https://dwas.tistory.com/27) / Tiếng Việt (vi) / Ελληνικά (el) / हिन्दी (hi)
-* ქართული (ka) / Nederlands (nl) / العربية (ar) / Español (es)
+> **Compatibility is version-specific.** Listing a device does not guarantee that every ROM, region conversion or LK patch is supported. The application may block unverified configurations.
 
-### Target models
-* Xiaoxin Pad Pro 2025 (TB375FC, TB373FU)
-* Xiaoxin Pad 12.1 (TB365FC, TB361FU)
-* Xiaoxin Pad 2025 (TB335FC, TB336FU)
-* Other Lenovo tablets using MediaTek Dimensity chipsets
+## Getting started
 
-> ⚠️ Note: Behavior may vary depending on device model, ROM, and SoC/platform.  
-> Always use **official firmware packages** intended for your specific device.
+1. Download and extract the [latest release](https://github.com/dwas-KR/LPMBox/releases/latest).
+2. Install the required MediaTek USB drivers. Enable USB debugging and authorize ADB when the selected operation requires it.
+3. Obtain the **official firmware for your exact device model and region** through Lenovo's authorized channels; prepare its `image/` folder as instructed by the application.
+4. Run `lpmbox.exe`, select the task and follow the on-screen checks.
 
----
+> **Warning:** Firmware flashing can erase data, prevent a device from booting or affect warranty coverage. Back up important data first. Do not disconnect the device during an active operation.
 
-## 3. Menu (Functions)
+## Build from source
 
-### 3.1 Option 1: Install/Flash PRC (CN) ↔ ROW (Global) Firmware [Data Wipe]
-Performs a clean installation (factory reset). **All user data will be erased.** 
+**Requirements:** Windows 10/11 (x64), Rust (see [rust-toolchain.toml](rust-toolchain.toml)), Visual Studio C++ Build Tools and the Windows SDK.
 
-### 3.2 Option 2: Update ROW (Global) Firmware [Keep Data]
-Use this option to freely switch between **ROW (Global)** firmware.
+```powershell
+cargo build --release --locked -p lpmbox-gui
+```
 
-### 3.3 Option 3: Disable OTA
-Disables system OTA update checks, notifications, and related components.
+Output: `target/release/lpmbox.exe`
 
-### 3.4 Option 4: Enable OTA [China ROM Only]
-Restores the system update app and OTA functionality on **PRC (China) ROM** devices.  
-If the device is running **ROW firmware**, a warning will be displayed and the program will return to the main menu.
+## Help
 
-### 3.5 Option 5: Download MediaTek Driver
-Opens the MediaTek driver download page and shows the current driver status  
-(e.g., **Installed / Not installed**).
+Setup and troubleshooting guides: [한국어](https://dwas.tistory.com/19) · [English](https://dwas.tistory.com/20) · [日本語](https://dwas.tistory.com/23) · [Русский](https://dwas.tistory.com/25) · [繁體中文](https://dwas.tistory.com/27)
 
-### 3.6 Option 6: Country Code Change Feature [ON/OFF]
-Toggles the **Country Code Change** feature.
+## License and acknowledgments
 
-- When **OFF**, Menu 1 and Menu 2 will skip the country code prompt and display:
-  `[*] Skipping country code feature.`
+LPMBox's original source code is licensed under **[GPL-3.0-only](LICENSE)**. Third-party software, icons, fonts and assets retain their own licenses; see [third-party notices](THIRD_PARTY_LICENSES/README.md). Earlier LPMBox license terms are preserved for historical reference and are not superseded for material governed by those terms. Redistributing firmware-derived LK images or manufacturer imagery requires separate rights verification.
 
-### 3.7 Option 7: Check for LPMBox Updates
-Checks the current LPMBox version and updates the tool if a newer version is available.
-
-### 3.8 Option 8: Change LPMBox Language
-Allows you to reselect your preferred UI language at any time.
-
-### 3.9 Option 9: Developer YouTube
-Opens the developer's YouTube channel with guides and tools related to Lenovo tablets (ZUI / ZUXOS).
-
-### 3.10 Exit
-Press `x` to exit the program.
-
----
-
-## 4. Quick Start (How to Use)
-
-### 4.1 Download & Extract
-Download the LPMBox release archive and **extract** it.
-
-### 4.2 Install Drivers (Important)
-You can install the MTK driver in either of the following ways:
-* Use **Option 4: MTK Driver Download** from the LPMBox main menu
-* Or manually download and install from:  
-  [https://mtkdriver.com/](https://mtkdriver.com/)
-
-**LPMBox detects whether the MediaTek driver is installed on your system.**
-
-### 4.3 Prepare the `image/` Folder (Important)
-Copy the official firmware **`image`** folder downloaded via Lenovo Software Fix into the LPMBox root directory.
-
-Typical contents include:
-* `image/`
-* `image/flash.xml`
-* `image/da.auth`
-* `image/<platform>_Android_scatter.x` (e.g., `MT0000_Android_scatter.x`)
-* `image/super.img`, `image/userdata.img`, `image/vendor.img`, etc.
-
-> The exact `image/` structure depends on the firmware package.  
-> Make sure you use **official firmware downloaded via Lenovo Software Fix**.
-
-### 4.4 Run
-Run `start.cmd` and select an option.
-
----
-
-## 5. Requirements
-
-### Recommended environment
-* Windows 10/11 (32-bit, 64-bit)
-* A stable USB cable/port (direct motherboard USB ports are recommended)
-* **USB debugging (ADB) enabled and PC authorized**
-* **MediaTek USB Port (Preloader) drivers installed**  
-  (In Device Manager, it should appear as “MediaTek Preloader USB VCOM”)
-
-### Required firmware files (provided by the user)
-An official firmware/tool package for your device that includes:
-* `flash.xml`
-* `da.auth` (DA/Authentication file)
-* `*_Android_scatter.x`
-* Partition image files referenced by `flash.xml` (e.g., `*.img`)
-
----
-
-## 6. ⚠️ Important: Disclaimer
-This project is provided for **learning, research, and personal use only**.  
-Firmware flashing and partition-level operations involve **serious risks**, including:
-* Device **bricking** / boot failure
-* **Data loss** (factory reset)
-* Warranty void, region/service restrictions, and related issues
-
-The author is not responsible for any damage or loss caused by using this tool.  
-**You are solely responsible for all outcomes. Use at your own risk.**
-
----
-
-## 7. Credits
-
-### 7.1 Inspired by / Based on
-* **LTBox** by **jjhitel** (and contributors)  
-  [https://github.com/jjhitel/LTBox](https://github.com/jjhitel/LTBox)  
-  (Licensed under CC BY-NC-SA 4.0 as stated in the LTBox README)
-
-### 7.2 Special thanks
-* **Anonymous[ㅇㅇ](https://gall.dcinside.com/board/lists?id=tabletpc)**: Thank you for sharing the LTBox project/files and making it possible to develop LPMBox.
-* **[hitin911](https://xdaforums.com/m/hitin911.12861404/)**: For providing the method to decrypt `.x` to `.xml` and for guidance on modifying XML scripts.
-
----
-
-## 8. Third-party
-* [Android platform-tools](https://developer.android.com/tools/releases/platform-tools?hl=en) (ADB/Fastboot)
-* [Python (embeddable)](https://www.python.org/downloads/windows/) / pip / open-source Python packages (e.g., [cryptography](https://pypi.org/project/cryptography/))
-* [SP Flash Tool V6](https://spflashtools.com/windows/sp-flash-tool-v6-2404)
-
-> LPMBox does **not** include Lenovo firmware.  
-> Users must download official firmware via official channels (e.g., Lenovo Software Fix).
-
----
-
-## 9. License
-LPMBox follows the same license model as **LTBox**.
-
-This work is licensed under the  
-**Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)**.
-
-For full details, see the `LICENSE` file or visit:  
-[https://creativecommons.org/licenses/by-nc-sa/4.0/](https://creativecommons.org/licenses/by-nc-sa/4.0/)
-
-> ⚠️ **Note**  
-> Third-party tools or files used or downloaded by LPMBox (e.g., SP Flash Tool, platform-tools, firmware packages)  
-> are subject to **their own licenses and distribution terms**. Please review and comply with them separately.
-
-[![CC BY-NC-SA 4.0][cc-by-nc-sa-image]][cc-by-nc-sa]
-
-[cc-by-nc-sa]: https://creativecommons.org/licenses/by-nc-sa/4.0/
-[cc-by-nc-sa-image]: https://licensebuttons.net/l/by-nc-sa/4.0/88x31.png
+Developed by [돠스 (dwas)](https://www.youtube.com/@dwas_KR). The project was developed with reference to [LTBox](https://github.com/jjhitel/LTBox) and is independent of its maintainers and Lenovo. Thanks to [community contributors](https://gall.dcinside.com/board/lists?id=tabletpc) and [hitin911](https://xdaforums.com/m/hitin911.12861404/) for shared research and technical guidance.
