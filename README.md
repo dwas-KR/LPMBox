@@ -31,7 +31,7 @@ Setup and troubleshooting guides: [한국어](https://dwas.tistory.com/19) · [E
 
 1. **Configure Windows Security**
    - Open **Windows Security → Device security → Core isolation**.
-   - Disable **Memory integrity** if required for MediaTek driver compatibility. Note that disabling this feature reduces Windows security.
+   - Disable **Memory integrity** if required for MediaTek driver compatibility.
 
 2. **Download and launch LPMBox**
    - Download the [latest release](https://github.com/dwas-KR/LPMBox/releases/latest).
