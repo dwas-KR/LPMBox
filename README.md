@@ -2,12 +2,14 @@
 
 **LPMBox v4.0.1** is an open-source Windows utility for firmware and device-management workflows on selected **Lenovo MediaTek tablets**.
 
-🌐 Languages & LPMBOX Error List and Solutions
+[Download releases](https://github.com/dwas-KR/LPMBox/releases) · [Report an issue](https://github.com/dwas-KR/LPMBox/issues) · [Video guide](https://youtu.be/M3hUF-AVJbM)
+
+## 🌐 LPMBOX Languages
 English (en) / 한국어 (ko) / Русский (ru) / 日本語 (jp)
 繁體中文 (CN/TW) / Tiếng Việt (vi) / Ελληνικά (el) / हिन्दी (hi)
 ქართული (ka) / Nederlands (nl) / العربية (ar) / Español (es)
 
-[Download releases](https://github.com/dwas-KR/LPMBox/releases) · [Report an issue](https://github.com/dwas-KR/LPMBox/issues) · [Video guide](https://youtu.be/M3hUF-AVJbM)
+Setup and troubleshooting guides: [한국어](https://dwas.tistory.com/19) · [English](https://dwas.tistory.com/20) · [日本語](https://dwas.tistory.com/23) · [Русский](https://dwas.tistory.com/25) · [繁體中文](https://dwas.tistory.com/27)
 
 ## Features
 
@@ -25,16 +27,40 @@ English (en) / 한국어 (ko) / Русский (ru) / 日本語 (jp)
 | TB335FC | TB336FU | Xiaoxin Pad 2025 |
 | TB365FC | TB361FU | Xiaoxin Pad 12.1 |
 
-> **Compatibility is version-specific.** Listing a device does not guarantee that every ROM, region conversion or LK patch is supported. The application may block unverified configurations.
-
 ## Getting started
 
-1. Download and extract the [latest release](https://github.com/dwas-KR/LPMBox/releases/latest).
-2. Install the required MediaTek USB drivers. Enable USB debugging and authorize ADB when the selected operation requires it.
-3. Obtain the **official firmware for your exact device model and region** through Lenovo's authorized channels; prepare its `image/` folder as instructed by the application.
-4. Run `lpmbox.exe`, select the task and follow the on-screen checks.
+1. **Configure Windows Security**
+   - Open **Windows Security → Device security → Core isolation**.
+   - Disable **Memory integrity** if required for MediaTek driver compatibility. Note that disabling this feature reduces Windows security.
 
-> **Warning:** Firmware flashing can erase data, prevent a device from booting or affect warranty coverage. Back up important data first. Do not disconnect the device during an active operation.
+2. **Download and launch LPMBox**
+   - Download the [latest release](https://github.com/dwas-KR/LPMBox/releases/latest).
+   - Extract the archive and run `lpmbox.exe`.
+
+3. **Download the official Lenovo firmware**
+   - Download and install [Lenovo Software Fix](https://support.lenovo.com/us/en/downloads/ds101291).
+   - Download the latest official firmware compatible with your exact tablet model.
+
+4. **Select the firmware folder**
+   - Open the **ROM Installation** tab in LPMBox.
+   - Select the `image` folder from the downloaded firmware package.
+   - LPMBox will automatically download and prepare the required components, including:
+     - [MediaTek USB drivers](https://mtkdriver.com/)
+     - [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
+     - [SP Flash Tool V6](https://spflashtools.com/windows/sp-flash-tool-v6-2404/)
+     - Other required dependencies
+
+5. **Choose an operation**
+   - Click **Next** and select the appropriate option:
+     - **Firmware Installation** — Install a compatible firmware package.
+     - **Firmware Update** — Update to a supported firmware version.
+     - **Device Recovery** — Recover a supported device from firmware-related issues.
+   - Follow the on-screen instructions to complete the process.
+
+6. **Complete the setup**
+   - Once the operation finishes successfully, your Lenovo tablet can run the selected **ROW (Global)** or **PRC (China)** firmware, depending on device compatibility.
+
+> **Warning:** Firmware flashing may erase user data, cause boot failures, or affect warranty coverage. Back up important data before proceeding, verify firmware compatibility, and never disconnect your device during an active flashing operation.
 
 ## Build from source
 
@@ -46,12 +72,18 @@ cargo build --release --locked -p lpmbox-gui
 
 Output: `target/release/lpmbox.exe`
 
-## Help
+## Credits
 
-Setup and troubleshooting guides: [한국어](https://dwas.tistory.com/19) · [English](https://dwas.tistory.com/20) · [日本語](https://dwas.tistory.com/23) · [Русский](https://dwas.tistory.com/25) · [繁體中文](https://dwas.tistory.com/27)
+Thanks to the following projects and contributors for sharing research, tools, information and technical guidance that helped shape LPMBox.
 
-## License and acknowledgments
+- **[LTBox(miner7222)](https://github.com/miner7222/LTBox)**
+- **[TB375FC-LK-patch(ifg)](https://github.com/ifg/TB375FC-LK-patch)**
+- **[hitin911](https://xdaforums.com/m/hitin911.12861404/)**
+- **[mistq](https://cafe.naver.com/f-e/cafes/27738104/articles/705314?boardtype=L&menuid=611&referrerAllArticles=false)**
+- **[Anonymousㅇㅇ](https://gall.dcinside.com/board/lists?id=tabletpc)**
 
-LPMBox's original source code is licensed under **[GPL-3.0-only](LICENSE)**. Third-party software, icons, fonts and assets retain their own licenses; see [third-party notices](THIRD_PARTY_LICENSES/README.md). Earlier LPMBox license terms are preserved for historical reference and are not superseded for material governed by those terms. Redistributing firmware-derived LK images or manufacturer imagery requires separate rights verification.
+## License
 
-Developed by [돠스 (dwas)](https://www.youtube.com/@dwas_KR). The project was developed with reference to [LTBox](https://github.com/jjhitel/LTBox) and is independent of its maintainers and Lenovo. Thanks to [community contributors](https://gall.dcinside.com/board/lists?id=tabletpc) and [hitin911](https://xdaforums.com/m/hitin911.12861404/) for shared research and technical guidance.
+LPMBox's original source code is licensed under the **[GNU General Public License v3.0 (GPL-3.0-only)](LICENSE)**.
+
+Third-party code and assets retain their original licenses. See [Third-party licenses and notices](THIRD_PARTY_LICENSES/README.md) for attribution and historical license information. The project's GPLv3 declaration does not override third-party rights or grant permission to redistribute firmware-derived LK images and manufacturer imagery.
