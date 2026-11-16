@@ -23,9 +23,9 @@ Setup and troubleshooting guides: [한국어](https://dwas.tistory.com/19) · [E
 
 | PRC (China) | ROW (Global) | Family |
 | --- | --- | --- |
-| TB375FC | TB373FU | Xiaoxin Pad Pro 2025 |
-| TB335FC | TB336FU | Xiaoxin Pad 2025 |
-| TB365FC | TB361FU | Xiaoxin Pad 12.1 |
+| TB375FC | TB373FU | Xiaoxin Pad Pro 2025 12.7 |
+| TB335FC | TB336FU | Xiaoxin Pad 2025 11 |
+| TB365FC | TB361FU | Xiaoxin Pad 2025 12.1 |
 
 ## Getting started
 
